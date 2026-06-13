@@ -77,14 +77,14 @@ const state = {
   n: 5,
   H: 1350,
   paletteIdx: 0,
-  bgStyle: "flat",      // flat | gradient | blurpano
+  bgStyle: "white",     // white | flat | gradient | blurpano
   texture: "grain",     // none | grain | paper
   title: "",
   theme: "dark",
   viewMode: "strip",    // strip | posts
   panelOpen: true,
   enabled: Object.fromEntries(
-    [...Object.keys(PATTERNS), ...DECOR_KEYS].map(k => [k, true])),
+    [...Object.keys(PATTERNS), ...DECOR_KEYS].map(k => [k, k !== "ribbon" && k !== "arcs"])),
   history: [],   // generated templates {boxes,bands,decor,layoutAt,n,H}
   cursor: -1,
   photos: [],    // per slot index: {src, img} | null
@@ -606,7 +606,7 @@ function createStrip(interactive) {
     root.style.height = T.H * s + "px";
     root.style.background = state.bgStyle === "gradient"
       ? `linear-gradient(135deg, ${shade(p.bg, 0.04)}, ${shade(p.bg, -0.06)})`
-      : p.bg;
+      : state.bgStyle === "white" ? "#FFFFFF" : p.bg;
 
     // panorama blur backdrop (1st photo behind everything)
     lyPano.innerHTML = "";
@@ -1235,6 +1235,8 @@ function drawStrip(c, s) {
     g.addColorStop(0, shade(p.bg, 0.04));
     g.addColorStop(1, shade(p.bg, -0.06));
     c.fillStyle = g;
+  } else if (state.bgStyle === "white") {
+    c.fillStyle = "#FFFFFF";
   } else {
     c.fillStyle = p.bg;
   }
@@ -1517,7 +1519,8 @@ function buildUI() {
     (v) => { state.viewMode = v; syncAll(); });
 
   buildSeg($("bgSeg"), [
-    { value: "flat", label: "Flat" },
+    { value: "white", label: "White", title: "Pure white background" },
+    { value: "flat", label: "Palette", title: "Follow the selected palette background" },
     { value: "gradient", label: "Gradient" },
     { value: "blurpano", label: "Photo blur", title: "Blurred 1st photo behind everything" },
   ], () => state.bgStyle,
