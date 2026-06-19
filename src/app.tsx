@@ -65,7 +65,7 @@ export function App() {
   const [viewMode, setViewMode] = React.useState<ViewMode>("strip");
   const [tab, setTab] = React.useState("layouts");
   const [selected, setSelected] = React.useState<number | null>(null);
-  const [zoom, setZoom] = React.useState(1);
+  const [zoom, setZoom] = React.useState(0.66);
   const [exportOpen, setExportOpen] = React.useState(false);
   const [toast, setToast] = React.useState<{ msg: string; id: number } | null>(null);
   const [spinning, setSpinning] = React.useState(false);
