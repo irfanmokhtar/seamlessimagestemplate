@@ -3,116 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Seamless Carousel Studio</title>
+<title>Seamless — Carousel Editor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-<div class="app" id="app" data-theme="dark">
-
-  <header class="topBar">
-    <div class="brand">
-      <span class="brandMark"><i></i><i></i><i></i></span>
-      <div class="brandText"><h1>Seamless</h1><span>carousel studio</span></div>
-    </div>
-
-    <div class="ctlGroup">
-      <label class="ctl"><span>Posts</span>
-        <span class="stepper">
-          <button type="button" class="stepBtn" id="stepMinus"></button>
-          <span class="stepVal" id="stepVal">5</span>
-          <button type="button" class="stepBtn" id="stepPlus"></button>
-        </span>
-      </label>
-      <label class="ctl"><span>Ratio</span>
-        <span class="seg compact" id="ratioSeg"></span>
-      </label>
-      <label class="ctl"><span>Palette</span>
-        <span class="palettePick" id="palettePick">
-          <button type="button" class="ctlBtn popTrigger" id="paletteBtn"
-            title="Canvas palette — recolors instantly, keeps the layout"></button>
-        </span>
-      </label>
-      <button type="button" class="ctlBtn patternsBtn open" id="patternsBtn"
-        title="Choose which layouts the generator may use">
-        <span>Patterns</span><em class="countBadge" id="patBadge" hidden></em>
-      </button>
-    </div>
-
-    <div class="ctlGroup right">
-      <span class="seg" id="viewSeg"></span>
-      <span class="vRule"></span>
-      <button type="button" class="ctlBtn iconOnly" id="undoBtn"
-        title="Undo — back to the previous template (⌘Z)"></button>
-      <span class="historyWrap" id="historyWrap">
-        <button type="button" class="ctlBtn popTrigger" id="historyBtn" disabled
-          title="Every generated template is kept — jump back to any of them"></button>
-      </span>
-      <span class="vRule"></span>
-      <button type="button" class="ctlBtn" id="addPhotosBtn"
-        title="Pick several photos — they fill the empty slots in order"></button>
-      <button type="button" class="ctlBtn primary" id="regenBtn"
-        title="Roll a new arrangement — your photos stay where they can"></button>
-      <button type="button" class="ctlBtn" id="exportBtn"
-        title="Slice the strip into individual posts"></button>
-      <span class="vRule"></span>
-      <button type="button" class="ctlBtn iconOnly" id="themeBtn"
-        title="Toggle light / dark studio"></button>
-    </div>
-  </header>
-
-  <div class="patternPanel open" id="patternPanel">
-    <div class="ppInner">
-      <div class="ppCols">
-        <section class="ppSection">
-          <header><h3>Single-post layouts</h3><p>How one post arranges its photos</p></header>
-          <div class="patGrid" id="patSingles"></div>
-        </section>
-        <section class="ppSection">
-          <header><h3>Cross-post layouts</h3><p>Span the boundary — this is the seamless effect</p></header>
-          <div class="patGrid" id="patMultis"></div>
-        </section>
-        <section class="ppSection">
-          <header><h3>Decor</h3><p>Accents drawn behind your photos</p></header>
-          <div class="patGrid" id="patDecor"></div>
-        </section>
-        <section class="ppSection styleSection">
-          <header><h3>Canvas style</h3><p>Applies instantly — never re-rolls the layout</p></header>
-          <div class="styleRows">
-            <label class="styleRow"><span>Background</span><span class="seg compact" id="bgSeg"></span></label>
-            <label class="styleRow"><span>Texture</span><span class="seg compact" id="texSeg"></span></label>
-            <label class="styleRow"><span>Title</span>
-              <input type="text" class="titleInput" id="titleText" maxlength="40" placeholder="e.g. CONVOCATION '26">
-            </label>
-          </div>
-        </section>
-      </div>
-      <p class="ppNote">
-        <i class="dotReroll"></i> Layout &amp; decor toggles <b>re-roll the template</b> (your photos stay)
-        <i class="dotInstant"></i> Canvas style applies <b>instantly</b>
-      </p>
-    </div>
-  </div>
-
-  <main class="stageMain">
-    <div class="stageWrap" id="stageWrap">
-      <div class="stageScroll">
-        <div class="stage" id="stage"></div>
-      </div>
-    </div>
-  </main>
-
-  <footer class="gestureBar">
-    <div class="gestures" id="gestures"></div>
-    <span class="dropHint" id="dropHint"></span>
-  </footer>
-</div>
-
-<div id="modalRoot"></div>
-<div id="toastRoot"></div>
-<input type="file" id="filePicker" accept="image/*" multiple hidden>
-<script src="app.js"></script>
+<div id="root"></div>
+<script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
