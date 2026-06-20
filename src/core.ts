@@ -6,18 +6,51 @@ import type { Box, Template, Palette, Enabled } from "./types";
 
 export const SLIDE_W = 1080;
 
-export const PALETTES: Palette[] = [
-  { name: "Warm White", bg: "#FAF7F1", ph: "#EAE3D6", ink: "#8A8175", text: "#3B362E" },
-  { name: "Cream",      bg: "#F4EDE1", ph: "#E2D7C2", ink: "#94886F", text: "#42392B" },
-  { name: "Soft Gray",  bg: "#F5F5F4", ph: "#E3E2DF", ink: "#8E8C88", text: "#3A3938" },
-  { name: "Sage",       bg: "#EEF1EA", ph: "#DBE1D3", ink: "#83907B", text: "#37402F" },
-  { name: "Blush",      bg: "#F7F0EC", ph: "#EADDD5", ink: "#9C8A80", text: "#46362E" },
-  { name: "Charcoal",   bg: "#181818", ph: "#2B2B2B", ink: "#8F8F8F", text: "#EDEAE3" },
-  { name: "Porcelain",  bg: "#FBFBFA", ph: "#ECECEA", ink: "#9A9A96", text: "#26261F" },
-  { name: "Olive",      bg: "#ECEDE3", ph: "#DBDDCC", ink: "#7E8268", text: "#383B2C" },
-  { name: "Clay",       bg: "#F2E9E2", ph: "#E3D1C3", ink: "#A07E68", text: "#48342A" },
-  { name: "Midnight",   bg: "#15171C", ph: "#262A33", ink: "#737A88", text: "#E7EAF0" },
+/* Background colors the user picks from. ph/ink/text (placeholder fill,
+   decor/line ink, title color) are derived from the bg via paletteFromBg
+   so every background stays readable — only the bg matters to the user. */
+export const BG_COLORS: { name: string; bg: string }[] = [
+  { name: "White",      bg: "#FFFFFF" },
+  { name: "Warm White", bg: "#FAF7F1" },
+  { name: "Cream",      bg: "#F4EDE1" },
+  { name: "Soft Gray",  bg: "#F1F1F0" },
+  { name: "Sand",       bg: "#EFE7DA" },
+  { name: "Sage",       bg: "#E6ECE2" },
+  { name: "Blush",      bg: "#F6E9E4" },
+  { name: "Sky",        bg: "#E6EEF4" },
+  { name: "Clay",       bg: "#E9D9CC" },
+  { name: "Olive",      bg: "#E4E6D6" },
+  { name: "Charcoal",   bg: "#1C1C1C" },
+  { name: "Midnight",   bg: "#15171C" },
+  { name: "Black",      bg: "#000000" },
+  { name: "Forest",     bg: "#1B2A22" },
 ];
+
+export function luminance(hex: string) {
+  const [r, g, b] = hexToRgb(hex);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+function shadeHex(hex: string, amt: number) {
+  const [r, g, b] = hexToRgb(hex);
+  const t = amt > 0 ? 255 : 0;
+  const f = Math.abs(amt);
+  const h = (c: number) => Math.round(c + (t - c) * f).toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+/* Build a full Palette from a single background color. Light bg → dark
+   ink/text; dark bg → light ink/text. Amounts mirror the old hand-tuned set. */
+export function paletteFromBg(bg: string, name: string): Palette {
+  const dark = luminance(bg) < 0.5;
+  const d = dark ? 1 : -1;
+  return {
+    name, bg,
+    ph:   shadeHex(bg, d * 0.10),
+    ink:  shadeHex(bg, d * 0.45),
+    text: shadeHex(bg, d * 0.88),
+  };
+}
+
+export const PALETTES: Palette[] = BG_COLORS.map(c => paletteFromBg(c.bg, c.name));
 
 export const PATTERNS: Record<string, { span: number; weight: number }> = {
   full:      { span: 1, weight: 3.0 },

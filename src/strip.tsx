@@ -6,7 +6,7 @@
    transition — the seamless concept, demonstrated by the UI itself. */
 
 import React from "react";
-import { SLIDE_W, PATTERN_INFO, rgba, shade } from "./core";
+import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance } from "./core";
 import type { Box, Palette, Panzoom, StripApi } from "./types";
 
 const GRAIN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -112,7 +112,7 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
       {box.frame === "polaroid" && (
         <div className="polaroidFrame" style={{
           left: -30 * s, top: -30 * s, right: -30 * s, bottom: -110 * s,
-          background: palette.name === "Charcoal" ? "#ECEAE4" : "#FFFFFF",
+          background: luminance(palette.bg) < 0.5 ? "#ECEAE4" : "#FFFFFF",
           boxShadow: `0 ${10 * s}px ${26 * s}px rgba(0,0,0,0.28)`,
         }}></div>
       )}

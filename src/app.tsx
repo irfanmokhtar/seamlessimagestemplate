@@ -35,7 +35,7 @@ export function App() {
   }, []);
 
   const [theme, setTheme] = React.useState<string>(
-    () => localStorage.getItem(THEME_KEY) || "light");
+    () => localStorage.getItem(THEME_KEY) || "dark");
   React.useEffect(() => { localStorage.setItem(THEME_KEY, theme); }, [theme]);
 
   const [docName, setDocName] = React.useState("Untitled carousel");

@@ -5,7 +5,7 @@
    React stores photos as src strings; the canvas path needs real
    HTMLImageElements, so loadImages() resolves them before drawing. */
 
-import { SLIDE_W, rgba, shade, rand, randInt } from "./core";
+import { SLIDE_W, rgba, shade, rand, randInt, luminance } from "./core";
 import type { Box, Template, Palette, Panzoom, BgStyle, Texture } from "./types";
 
 export interface ExportOpts {
@@ -123,7 +123,7 @@ function drawPolaroidFrame(c: CanvasRenderingContext2D, o: ExportOpts, box: Box,
     c.shadowColor = "rgba(0,0,0,0.28)";
     c.shadowBlur = 26 * s;
     c.shadowOffsetY = 10 * s;
-    c.fillStyle = o.palette.name === "Charcoal" ? "#ECEAE4" : "#FFFFFF";
+    c.fillStyle = luminance(o.palette.bg) < 0.5 ? "#ECEAE4" : "#FFFFFF";
     c.fillRect(bx - b * s, by - b * s, bw + 2 * b * s, bh + (b + bot) * s);
     c.shadowColor = "transparent";
   });

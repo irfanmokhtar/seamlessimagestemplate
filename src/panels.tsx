@@ -300,10 +300,10 @@ export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bg
           <Seg full compact value={H} onChange={onH}
             options={RATIOS.map(r => ({ value: r.h, label: r.label, title: `${r.name} — 1080×${r.h}` }))} />
         </InspGroup>
-        <InspGroup label="Palette">
+        <InspGroup label="Background color">
           <PaletteSwatches paletteIdx={paletteIdx} onChange={onPalette} />
         </InspGroup>
-        <InspGroup label="Background">
+        <InspGroup label="Background style">
           <Seg full compact value={bgStyle} onChange={onBgStyle} options={[
             { value: "flat", label: "Flat" },
             { value: "gradient", label: "Gradient" },

@@ -103,11 +103,7 @@ export function PaletteSwatches({ paletteIdx, onChange }: any) {
         <button key={pal.name} type="button" title={pal.name}
           className={"palSw" + (i === paletteIdx ? " on" : "")}
           onClick={() => onChange(i)}>
-          <span className="palSwInk">
-            <i style={{ background: pal.ph }}></i>
-            <i style={{ background: pal.ink }}></i>
-            <i style={{ background: pal.text }}></i>
-          </span>
+          <span className="palSwBg" style={{ background: pal.bg }}></span>
           <small>{pal.name}</small>
         </button>
       ))}
