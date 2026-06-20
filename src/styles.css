@@ -503,7 +503,7 @@ button { font-family: inherit; }
   cursor: pointer; border-radius: 6px;
 }
 .ssClip {
-  display: block; overflow: hidden; border-radius: 5px;
+  display: block; position: relative; overflow: hidden; border-radius: 5px;
   box-shadow: 0 0 0 1px var(--border-2); transition: box-shadow 0.14s;
 }
 .ssThumb:hover .ssClip { box-shadow: 0 0 0 1px var(--border-2), 0 4px 12px rgba(0,0,0,0.18); }
