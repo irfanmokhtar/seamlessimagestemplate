@@ -1,7 +1,7 @@
 /* app.tsx — Seamless editor: state, wiring, layout. */
 
 import React from "react";
-import { PATTERNS, DECOR_KEYS, PALETTES, generateTemplate } from "./core";
+import { PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate } from "./core";
 import { clampPan } from "./strip";
 import { StripStage } from "./strip";
 import { TopBar, LeftRail, LeftPanel, Inspector, BottomStrip } from "./panels";
@@ -213,10 +213,14 @@ export function App() {
   };
 
   const selectPost = (i: number) => {
-    const first = tpl.boxes.findIndex((b: Box) => b.slide === i);
-    setSelected(first >= 0 ? first : null);
-    const el = document.querySelector(".stageScroll");
-    if (el) el.scrollTo({ left: el.scrollWidth * (i / tpl.n), behavior: "smooth" });
+    // prefer a box that starts in this slide; else any box overlapping it (cross-slide span)
+    const lo = i * SLIDE_W, hi = (i + 1) * SLIDE_W;
+    let idx = tpl.boxes.findIndex((b: Box) => b.slide === i);
+    if (idx < 0) idx = tpl.boxes.findIndex((b: Box) => b.x < hi && b.x + b.w > lo);
+    if (idx >= 0) setSelected(idx);
+    // scroll the actual post window into view (robust to centering + posts-mode gaps)
+    const win = document.querySelectorAll(".slideWin")[i] as HTMLElement | undefined;
+    win?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   };
   const addPost = () => { if (n < 10) changeN(n + 1); };
 
