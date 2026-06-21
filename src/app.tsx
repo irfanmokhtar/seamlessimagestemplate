@@ -1,7 +1,7 @@
 /* app.tsx — Seamless editor: state, wiring, layout. */
 
 import React from "react";
-import { PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate } from "./core";
+import { PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate, resizeTemplate } from "./core";
 import { clampPan } from "./strip";
 import { StripStage } from "./strip";
 import { TopBar, LeftRail, LeftPanel, Inspector, BottomStrip } from "./panels";
@@ -81,15 +81,14 @@ export function App() {
   };
 
   /* ----- template + history (undo / redo) ----- */
-  const pushTemplate = (newTpl: any) => {
+  const pushTemplate = (newTpl: any, preserve = false) => {
     setHistory(h => {
       const trimmed = h.slice(0, cursor + 1);
       const next = [...trimmed, newTpl];
       return next.length > 24 ? next.slice(next.length - 24) : next;
     });
     setCursor(c => Math.min(c + 1, 23));
-    setPanzoom({});
-    setSelected(null);
+    if (!preserve) { setPanzoom({}); setSelected(null); }
   };
 
   const regenerate = (nn = n, hh = H, en = enabled) => {
@@ -125,7 +124,10 @@ export function App() {
     return () => window.removeEventListener("keydown", h);
   });
 
-  const changeN = (v: number) => { setN(v); regenerate(v, H, enabled); };
+  const changeN = (v: number) => {
+    setN(v);
+    pushTemplate(resizeTemplate(tpl, v, H, enabled), true);
+  };
   const changeH = (v: number) => { setH(v); regenerate(n, v, enabled); };
   const togglePattern = (k: string) => {
     const next = { ...enabled, [k]: enabled[k] === false };

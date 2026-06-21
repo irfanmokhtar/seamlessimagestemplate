@@ -129,7 +129,7 @@ function weightedPick(types: string[]) {
 
 /* ---------- sequence ---------- */
 
-function genSequence(n: number, enabled: Enabled) {
+function genSequence(n: number, enabled: Enabled, start = 0, prevInit: string | null = null) {
   const singles = Object.keys(PATTERNS)
     .filter(t => PATTERNS[t].span === 1 && enabled[t]);
   const multis = Object.keys(PATTERNS)
@@ -137,8 +137,8 @@ function genSequence(n: number, enabled: Enabled) {
   if (!singles.length) singles.push("full");
 
   const seq: { type: string; span: number; slide: number }[] = [];
-  let i = 0;
-  let prev: string | null = null;
+  let i = start;
+  let prev: string | null = prevInit;
   while (i < n) {
     const rem = n - i;
     const multiPool = multis.filter(t => t !== prev && PATTERNS[t].span <= rem);
@@ -182,17 +182,13 @@ function makeBox(
   };
 }
 
-export function generateTemplate(n: number, H: number, enabled: Enabled): Template {
-  coreBoxId = 0;
+/* one layout's boxes/bands, pushed into the given arrays (strip coords) */
+function emitLayout(
+  t: string, span: number, i: number, H: number,
+  boxes: Box[], bands: Template["bands"],
+) {
   const vs = H / 1350;
-  const boxes: Box[] = [];
-  const bands: Template["bands"] = [];
-  const layoutAt: string[] = new Array(n);
-  const seq = genSequence(n, enabled);
-
-  for (const { type: t, span, slide: i } of seq) {
-    const sx = i * SLIDE_W;
-    for (let k = 0; k < span; k++) layoutAt[i + k] = t;
+  const sx = i * SLIDE_W;
 
     if (t === "full") {
       boxes.push(makeBox(i, sx, 0, SLIDE_W, H));
@@ -314,24 +310,41 @@ export function generateTemplate(n: number, H: number, enabled: Enabled): Templa
         boxes.push(makeBox(i, sx + k * (fw + g), fy, fw, fh));
       }
     }
-  }
+}
 
-  // seamless overhangs
-  if (enabled.overhang) {
-    const margined = ["framed", "stack2", "grid4", "editorial"];
-    for (let i = 0; i < n; i++) {
-      if (layoutAt[i] !== "full") continue;
-      const box = boxes.find(b => b.slide === i && b.w === SLIDE_W);
-      if (!box) continue;
-      if (i + 1 < n && margined.includes(layoutAt[i + 1])) {
-        box.w += randInt(50, 130);
-      }
-      if (i - 1 >= 0 && margined.includes(layoutAt[i - 1])) {
-        const o = randInt(50, 130);
-        box.x -= o; box.w += o;
-      }
+/* widen full-bleed boxes that neighbor a margined layout, slides [start, n) */
+function applyOverhangs(
+  boxes: Box[], layoutAt: string[], n: number, start = 0,
+) {
+  const margined = ["framed", "stack2", "grid4", "editorial"];
+  for (let i = start; i < n; i++) {
+    if (layoutAt[i] !== "full") continue;
+    const box = boxes.find(b => b.slide === i && b.x + b.w === (i + 1) * SLIDE_W);
+    if (!box) continue;
+    if (i + 1 < n && margined.includes(layoutAt[i + 1])) {
+      box.w += randInt(50, 130);
+    }
+    if (i - 1 >= start && margined.includes(layoutAt[i - 1])) {
+      const o = randInt(50, 130);
+      box.x -= o; box.w += o;
     }
   }
+}
+
+export function generateTemplate(n: number, H: number, enabled: Enabled): Template {
+  coreBoxId = 0;
+  const vs = H / 1350;
+  const boxes: Box[] = [];
+  const bands: Template["bands"] = [];
+  const layoutAt: string[] = new Array(n);
+  const seq = genSequence(n, enabled);
+
+  for (const { type: t, span, slide: i } of seq) {
+    for (let k = 0; k < span; k++) layoutAt[i + k] = t;
+    emitLayout(t, span, i, H, boxes, bands);
+  }
+
+  if (enabled.overhang) applyOverhangs(boxes, layoutAt, n);
 
   // decor
   const decor: Template["decor"] = [];
@@ -352,4 +365,51 @@ export function generateTemplate(n: number, H: number, enabled: Enabled): Templa
   }
 
   return { boxes, bands, decor, layoutAt, n, H };
+}
+
+/* Resize an existing template to `newN` posts WITHOUT reshuffling kept slides.
+   Growing appends fresh layouts; shrinking trims slides (and any cross-slide
+   layout / decor that would overflow the new strip width). */
+export function resizeTemplate(
+  tpl: Template, newN: number, H: number, enabled: Enabled,
+): Template {
+  const oldN = tpl.n;
+  if (newN === oldN || H !== tpl.H) return generateTemplate(newN, H, enabled);
+
+  coreBoxId = tpl.boxes.reduce((m, b) => Math.max(m, b.id), 0);
+
+  if (newN > oldN) {
+    const boxes = tpl.boxes.slice();
+    const bands = tpl.bands.slice();
+    const layoutAt = tpl.layoutAt.slice();
+    const seq = genSequence(newN, enabled, oldN, tpl.layoutAt[oldN - 1] ?? null);
+    for (const { type: t, span, slide: i } of seq) {
+      for (let k = 0; k < span && i + k < newN; k++) layoutAt[i + k] = t;
+      emitLayout(t, span, i, H, boxes, bands);
+    }
+    // overhangs only across the new join + within the appended region — existing
+    // boxes keep their original geometry.
+    if (enabled.overhang) applyOverhangs(boxes, layoutAt, newN, oldN - 1);
+    return { boxes, bands, decor: tpl.decor, layoutAt, n: newN, H };
+  }
+
+  // shrink: keep boxes/bands fully inside the new strip
+  const limit = newN * SLIDE_W;
+  const boxes = tpl.boxes.filter(b => b.slide < newN && b.x >= 0 && b.x + b.w <= limit + 4);
+  const bands = tpl.bands.filter(b => b.x >= 0 && b.x + b.w <= limit + 4);
+  const layoutAt = tpl.layoutAt.slice(0, newN);
+
+  // backfill any slide left empty by a dropped cross-slide layout
+  for (let i = 0; i < newN; i++) {
+    const lo = i * SLIDE_W, hi = (i + 1) * SLIDE_W;
+    const covered = boxes.some(b => b.x < hi && b.x + b.w > lo)
+      || bands.some(b => b.x < hi && b.x + b.w > lo);
+    if (!covered) {
+      emitLayout("full", 1, i, H, boxes, bands);
+      layoutAt[i] = "full";
+    }
+  }
+
+  const decor = tpl.decor.filter(d => d.kind !== "circle" || d.cx <= limit);
+  return { boxes, bands, decor, layoutAt, n: newN, H };
 }
