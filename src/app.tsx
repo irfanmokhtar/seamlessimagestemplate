@@ -196,6 +196,14 @@ export function App() {
         return { ...pz, [i]: { ...cur, z: clamp(cur.z * f, 1, 4) } };
       });
     },
+    rotateMode: tab === "crop",
+    onRotate: (i: number, dDeg: number, box: Box) => {
+      setPanzoom(pz => {
+        const cur = pz[i] || { x: 0, y: 0, z: 1, r: 0 };
+        const r = clamp((cur.r || 0) + dDeg, -45, 45);
+        return { ...pz, [i]: clampPan(box, { ...cur, r }, photos[i]) };
+      });
+    },
   };
 
   /* inspector actions */
@@ -207,7 +215,12 @@ export function App() {
     const box = tpl.boxes[i];
     if (box) api.onPan(i, dx, dy, box);
   };
-  const onFitPhoto = (i: number) => setPanzoom(pz => ({ ...pz, [i]: { x: 0, y: 0, z: 1 } }));
+  const onFitPhoto = (i: number) => setPanzoom(pz => ({ ...pz, [i]: { x: 0, y: 0, z: 1, r: 0 } }));
+  const onStraighten = (i: number, deg: number) => setPanzoom(pz => {
+    const cur = pz[i] || { x: 0, y: 0, z: 1, r: 0 };
+    const box = tpl.boxes[i];
+    return { ...pz, [i]: clampPan(box, { ...cur, r: deg }, photos[i]) };
+  });
 
   const onStageDrop = (e: React.DragEvent) => {
     const files = [...e.dataTransfer.files].filter(f => f.type.startsWith("image/"));
@@ -251,7 +264,8 @@ export function App() {
           onShuffle={() => regenerate()} spinning={spinning}
           tpl={tpl} photos={photos} onAddPhotos={() => openPicker(null)}
           onSelectSlot={(i: number) => setSelected(i)} selected={selected}
-          title={title} onTitle={setTitle} />
+          title={title} onTitle={setTitle}
+          panzoom={panzoom} onStraighten={onStraighten} onFitPhoto={onFitPhoto} />
 
         <div className="workspace">
           <main className="canvasArea">
@@ -270,7 +284,8 @@ export function App() {
           onPalette={setPaletteIdx} onN={changeN} onH={changeH}
           onBgStyle={setBgStyle} onTexture={setTexture}
           onReplace={openPicker} onRemove={api.onRemove}
-          onZoomTo={onZoomTo} onNudge={onNudge} onFitPhoto={onFitPhoto} />
+          onZoomTo={onZoomTo} onNudge={onNudge} onFitPhoto={onFitPhoto}
+          onStraighten={onStraighten} />
       </div>
 
       <ExportModal open={exportOpen} onClose={() => setExportOpen(false)}

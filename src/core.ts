@@ -101,6 +101,16 @@ export const RATIOS = [
 export const rand = (a: number, b: number) => a + Math.random() * (b - a);
 export const randInt = (a: number, b: number) => Math.floor(rand(a, b + 1));
 
+/* Minimum uniform up-scale so a w×h image still fully covers a w×h box once
+   the image content is rotated by `deg`. Used to keep slots covered while
+   straightening. */
+export function rotCover(w: number, h: number, deg: number) {
+  if (!deg) return 1;
+  const a = Math.abs(deg) * Math.PI / 180;
+  const c = Math.cos(a), sn = Math.sin(a);
+  return Math.max((w * c + h * sn) / w, (w * sn + h * c) / h);
+}
+
 export function hexToRgb(hex: string): [number, number, number] {
   const v = parseInt(hex.slice(1), 16);
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];

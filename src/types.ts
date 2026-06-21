@@ -44,6 +44,7 @@ export interface Panzoom {
   x: number;
   y: number;
   z: number;
+  r?: number; // content straighten angle, degrees
 }
 
 export type Enabled = Record<string, boolean>;
@@ -58,10 +59,12 @@ export interface StripApi {
   photos: (string | null)[];
   panzoom: Record<number, Panzoom>;
   interactive: boolean;
+  rotateMode?: boolean; // canvas drag rotates content instead of panning
   onSelect?: (i: number) => void;
   onSlotClick?: (i: number) => void;
   onDropFile?: (i: number, file: File) => void;
   onRemove?: (i: number) => void;
   onPan?: (i: number, dx: number, dy: number, box: Box) => void;
   onZoom?: (i: number, f: number) => void;
+  onRotate?: (i: number, dDeg: number, box: Box) => void;
 }

@@ -190,6 +190,46 @@ function TextSection({ title, onTitle }: any) {
   );
 }
 
+function CropSection({ tpl, photos, panzoom, selected, onSelectSlot, onStraighten, onFitPhoto }: any) {
+  const slots = tpl.boxes.map((_b: any, i: number) => i);
+  const sel = selected != null ? selected : null;
+  const src = sel != null ? photos[sel] : null;
+  const pz = (sel != null && panzoom[sel]) || { x: 0, y: 0, z: 1, r: 0 };
+  return (
+    <>
+      <div className="panelHd">
+        <h2>Crop & straighten</h2>
+        <p>Rotate a photo inside its slot. Drag the photo on the canvas to rotate, or use the slider.</p>
+      </div>
+      <div className="panelScroll">
+        <div className="photoTray">
+          {slots.map((i: number) => (
+            <button key={i} type="button"
+              className={"trayItem" + (selected === i ? " on" : "") + (photos[i] ? "" : " empty")}
+              onClick={() => onSelectSlot(i)} title={"Slot " + (i + 1)}>
+              {photos[i]
+                ? <img src={photos[i]} alt="" draggable={false} />
+                : <span className="trayNum">{i + 1}</span>}
+              <em>{i + 1}</em>
+            </button>
+          ))}
+        </div>
+
+        {sel != null ? (
+          <InspGroup label={"Straighten · slot " + (sel + 1)}>
+            <StraightenControl index={sel} src={src} deg={pz.r || 0} onStraighten={onStraighten} />
+            <button type="button" className="miniBtn" disabled={!src}
+              onClick={() => onFitPhoto(sel)}>{Ic.reset}<span>Reset framing</span></button>
+          </InspGroup>
+        ) : (
+          <p className="inspHint" style={{ padding: "0 4px" }}>Select a slot above to straighten it.</p>
+        )}
+      </div>
+      <p className="panelFoot">Straightening auto-zooms the photo so the slot stays filled.</p>
+    </>
+  );
+}
+
 function SoonSection({ icon, title, blurb, items }: any) {
   return (
     <>
@@ -221,9 +261,7 @@ export function LeftPanel(props: any) {
   else if (tab === "adjust") body = <SoonSection icon={Ic.adjust} title="Adjust"
     blurb="Tune each photo to match." items={[
       "Brightness, contrast & warmth", "Filters & presets", "Per-photo or whole carousel"]} />;
-  else if (tab === "crop") body = <SoonSection icon={Ic.crop} title="Crop & straighten"
-    blurb="Reframe a photo inside its slot." items={[
-      "Drag handles to crop", "Straighten & rotate", "Lock to slot aspect ratio"]} />;
+  else if (tab === "crop") body = <CropSection {...props} />;
   return <aside className="leftPanel">{body}</aside>;
 }
 
@@ -231,7 +269,7 @@ export function LeftPanel(props: any) {
 
 export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bgStyle, texture,
   onPalette, onN, onH, onBgStyle, onTexture, onReplace, onRemove, onZoomTo, onNudge,
-  onFitPhoto }: any) {
+  onFitPhoto, onStraighten }: any) {
 
   if (selected != null) {
     const src = photos[selected];
@@ -276,8 +314,13 @@ export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bg
             <p className="inspHint">Or drag the photo on the canvas, scroll to zoom.</p>
           </InspGroup>
 
+          <InspGroup label="Straighten">
+            <StraightenControl index={selected} src={src} deg={pz.r || 0}
+              onStraighten={onStraighten} />
+            <p className="inspHint">Or pick the Crop tool and drag the photo to rotate.</p>
+          </InspGroup>
+
           <InspGroup label="Coming soon">
-            <div className="soonRow">{Ic.crop}<span>Crop & straighten</span>{Ic.lock}</div>
             <div className="soonRow">{Ic.adjust}<span>Brightness & filters</span>{Ic.lock}</div>
             <div className="soonRow">{Ic.fitFill}<span>Free resize slot</span>{Ic.lock}</div>
           </InspGroup>
@@ -320,6 +363,22 @@ export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bg
         <p className="inspHint pad">Select a photo on the canvas to edit it individually.</p>
       </div>
     </aside>
+  );
+}
+
+export function StraightenControl({ index, src, deg, onStraighten }: any) {
+  const d = deg || 0;
+  return (
+    <>
+      <div className="sliderRow">
+        <input type="range" className="slider" min="-45" max="45" step="0.5"
+          value={d} disabled={!src}
+          onChange={(e) => onStraighten(index, Number(e.target.value))} />
+        <span className="sliderVal">{d > 0 ? "+" : ""}{d.toFixed(1)}°</span>
+      </div>
+      <button type="button" className="miniBtn" disabled={!src || d === 0}
+        onClick={() => onStraighten(index, 0)}>{Ic.reset}<span>Reset to 0°</span></button>
+    </>
   );
 }
 

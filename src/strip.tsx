@@ -6,7 +6,7 @@
    transition — the seamless concept, demonstrated by the UI itself. */
 
 import React from "react";
-import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance } from "./core";
+import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover } from "./core";
 import type { Box, Palette, Panzoom, StripApi } from "./types";
 
 const GRAIN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -18,7 +18,7 @@ export const natCache: Record<string, { w: number; h: number }> = {};
 export function clampPan(box: Box, pz: Panzoom, src: string | null): Panzoom {
   const nat = src ? natCache[src] : null;
   if (!nat) return pz;
-  const base = Math.max(box.w / nat.w, box.h / nat.h) * pz.z;
+  const base = Math.max(box.w / nat.w, box.h / nat.h) * pz.z * rotCover(box.w, box.h, pz.r || 0);
   const maxX = Math.max(0, (nat.w * base - box.w) / 2);
   const maxY = Math.max(0, (nat.h * base - box.h) / 2);
   return {
@@ -34,10 +34,10 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   box: Box; index: number; s: number; palette: Palette; api: StripApi; selected: boolean;
 }) {
   const src = api.photos[index] || null;
-  const pzRaw = api.panzoom[index] || { x: 0, y: 0, z: 1 };
+  const pzRaw = api.panzoom[index] || { x: 0, y: 0, z: 1, r: 0 };
   const pz = src ? clampPan(box, pzRaw, src) : pzRaw;
   const ref = React.useRef<HTMLDivElement>(null);
-  const drag = React.useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const drag = React.useRef<any>(null);
   const [over, setOver] = React.useState(false);
   const [, force] = React.useState(0);
 
@@ -57,13 +57,27 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   const onPointerDown = (e: React.PointerEvent) => {
     if (!api.interactive || e.button !== 0) return;
     if (e.altKey) return; // handled in click
-    if (src) {
+    if (!src) return;
+    if (api.rotateMode) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      drag.current = { rot: true, cx, cy, ang: Math.atan2(e.clientY - cy, e.clientX - cx), moved: false };
+    } else {
       drag.current = { x: e.clientX, y: e.clientY, moved: false };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     }
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag.current) return;
+    if (drag.current.rot) {
+      const a = Math.atan2(e.clientY - drag.current.cy, e.clientX - drag.current.cx);
+      let d = a - drag.current.ang;
+      if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+      drag.current.ang = a;
+      drag.current.moved = true;
+      api.onRotate?.(index, d * 180 / Math.PI, box);
+      return;
+    }
     let dx = (e.clientX - drag.current.x) / s;
     let dy = (e.clientY - drag.current.y) / s;
     if (box.rot) {
@@ -109,18 +123,20 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   // other parts of the photo rather than the background. clampPan uses the same
   // cover math. Before natural size is known, fall back to CSS object-fit cover.
   const nat = src ? natCache[src] : null;
+  const rot = pz.r || 0;
+  const tf = `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z}) rotate(${rot}deg)`;
   let imgStyle: React.CSSProperties;
   if (nat) {
-    const cover = Math.max(box.w / nat.w, box.h / nat.h);
+    const cover = Math.max(box.w / nat.w, box.h / nat.h) * rotCover(box.w, box.h, rot);
     const iw = nat.w * cover * s, ih = nat.h * cover * s;
     imgStyle = {
       position: "absolute",
       width: iw, height: ih,
       left: (box.w * s - iw) / 2, top: (box.h * s - ih) / 2,
-      transform: `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z})`,
+      transform: tf,
     };
   } else {
-    imgStyle = { transform: `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z})` };
+    imgStyle = { transform: tf };
   }
 
   return (

@@ -5,7 +5,7 @@
    React stores photos as src strings; the canvas path needs real
    HTMLImageElements, so loadImages() resolves them before drawing. */
 
-import { SLIDE_W, rgba, shade, rand, randInt, luminance } from "./core";
+import { SLIDE_W, rgba, shade, rand, randInt, luminance, rotCover } from "./core";
 import type { Box, Template, Palette, Panzoom, BgStyle, Texture } from "./types";
 
 export interface ExportOpts {
@@ -42,7 +42,8 @@ const imgAt = (o: ExportOpts, i: number): HTMLImageElement | null => {
 };
 
 function clampPanImg(box: Box, pz: Panzoom, img: HTMLImageElement): Panzoom {
-  const base = Math.max(box.w / img.naturalWidth, box.h / img.naturalHeight) * pz.z;
+  const base = Math.max(box.w / img.naturalWidth, box.h / img.naturalHeight)
+    * pz.z * rotCover(box.w, box.h, pz.r || 0);
   const maxX = Math.max(0, (img.naturalWidth * base - box.w) / 2);
   const maxY = Math.max(0, (img.naturalHeight * base - box.h) / 2);
   return { ...pz, x: clamp(pz.x, -maxX, maxX), y: clamp(pz.y, -maxY, maxY) };
@@ -102,18 +103,18 @@ function boxTransform(c: CanvasRenderingContext2D, box: Box, s: number,
 
 function drawCover(c: CanvasRenderingContext2D, o: ExportOpts, box: Box, i: number, s: number) {
   const img = imgAt(o, i)!;
-  const pz = clampPanImg(box, o.panzoom[i] || { x: 0, y: 0, z: 1 }, img);
-  const base = Math.max(box.w / img.naturalWidth, box.h / img.naturalHeight) * pz.z;
+  const pz = clampPanImg(box, o.panzoom[i] || { x: 0, y: 0, z: 1, r: 0 }, img);
+  const base = Math.max(box.w / img.naturalWidth, box.h / img.naturalHeight)
+    * pz.z * rotCover(box.w, box.h, pz.r || 0);
   const dw = img.naturalWidth * base;
   const dh = img.naturalHeight * base;
   boxTransform(c, box, s, (bx, by, bw, bh) => {
     c.beginPath();
     c.rect(bx, by, bw, bh);
     c.clip();
-    c.drawImage(img,
-      bx + ((box.w - dw) / 2 + pz.x) * s,
-      by + ((box.h - dh) / 2 + pz.y) * s,
-      dw * s, dh * s);
+    c.translate(pz.x * s, pz.y * s);
+    if (pz.r) c.rotate(pz.r * Math.PI / 180);
+    c.drawImage(img, (-dw / 2) * s, (-dh / 2) * s, dw * s, dh * s);
   });
 }
 
