@@ -222,10 +222,12 @@ export function drawStrip(c: CanvasRenderingContext2D, s: number, o: ExportOpts)
     }
   }
 
-  // blurred photo backgrounds behind framed slots
-  T.boxes.forEach((box, i) => {
-    if (box.blurBg && imgAt(o, i)) drawBlurBg(c, o, box, i, s);
-  });
+  // blurred photo backgrounds behind framed slots (blur bg style only)
+  if (o.bgStyle === "blurpano") {
+    T.boxes.forEach((box, i) => {
+      if (box.blurBg && imgAt(o, i)) drawBlurBg(c, o, box, i, s);
+    });
+  }
 
   // decor
   for (const d of T.decor) {

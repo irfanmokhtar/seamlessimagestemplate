@@ -39,6 +39,7 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   const ref = React.useRef<HTMLDivElement>(null);
   const drag = React.useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const [over, setOver] = React.useState(false);
+  const [, force] = React.useState(0);
 
   // non-passive wheel for zoom
   React.useEffect(() => {
@@ -104,6 +105,24 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
 
   const small = box.w * s < 90 || box.h * s < 70;
 
+  // Render image at its cover size (overflowing the box) so panning reveals
+  // other parts of the photo rather than the background. clampPan uses the same
+  // cover math. Before natural size is known, fall back to CSS object-fit cover.
+  const nat = src ? natCache[src] : null;
+  let imgStyle: React.CSSProperties;
+  if (nat) {
+    const cover = Math.max(box.w / nat.w, box.h / nat.h);
+    const iw = nat.w * cover * s, ih = nat.h * cover * s;
+    imgStyle = {
+      position: "absolute",
+      width: iw, height: ih,
+      left: (box.w * s - iw) / 2, top: (box.h * s - ih) / 2,
+      transform: `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z})`,
+    };
+  } else {
+    imgStyle = { transform: `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z})` };
+  }
+
   return (
     <div ref={ref} className={"photoBox" + (over ? " dropOver" : "") + (selected ? " selected" : "")} style={style}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
@@ -121,9 +140,11 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
           <img src={src} alt="" draggable={false}
             onLoad={(e) => {
               const img = e.target as HTMLImageElement;
+              const known = !!natCache[src];
               natCache[src] = { w: img.naturalWidth, h: img.naturalHeight };
+              if (!known) force(v => v + 1);
             }}
-            style={{ transform: `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z})` }} />
+            style={imgStyle} />
         ) : (
           <div className="placeholder" style={{
             background: palette.ph, color: rgba(palette.ink, 0.9),
@@ -170,8 +191,8 @@ export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, se
         </div>
       )}
 
-      {/* blurred photo backdrops behind framed slots */}
-      {tpl.boxes.map((b: Box, i: number) => (b.blurBg && api.photos[i]) ? (
+      {/* blurred photo backdrops behind framed slots (blur bg style only) */}
+      {bgStyle === "blurpano" && tpl.boxes.map((b: Box, i: number) => (b.blurBg && api.photos[i]) ? (
         <div key={"bb" + i} className="blurBgSlide" style={{
           left: b.slide * SLIDE_W * s, width: SLIDE_W * s, height: H,
         }}>
