@@ -2,7 +2,7 @@
    right contextual inspector, bottom slide strip. */
 
 import React from "react";
-import { PATTERNS, DECOR_KEYS, RATIOS, SLIDE_W, PALETTES } from "./core";
+import { PATTERNS, DECOR_KEYS, RATIOS, SLIDE_W, PALETTES, FONTS, fontStack } from "./core";
 import { Ic, Seg, Stepper, IconBtn, PaletteSwatches, PatternTile } from "./icons";
 import { StripContent } from "./strip";
 
@@ -63,7 +63,7 @@ const LEFT_TABS = [
   { id: "photos",  label: "Photos",  icon: Ic.image },
   { id: "text",    label: "Text",    icon: Ic.text },
   { id: "adjust",  label: "Adjust",  icon: Ic.adjust, soon: true },
-  { id: "crop",    label: "Crop",    icon: Ic.crop, soon: true },
+  { id: "crop",    label: "Crop",    icon: Ic.crop },
 ];
 
 export function LeftRail({ tab, onTab }: any) {
@@ -159,34 +159,126 @@ function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected }: any
   );
 }
 
-function TextSection({ title, onTitle }: any) {
+const TEXT_COLORS = ["auto", "#FFFFFF", "#111111", "#C9A24B", "#E4572E", "#3A6B6B"];
+
+function TextSection({ texts = [], selText, onAddText, onUpdateText, onRemoveText, onSelectText }: any) {
+  const sel = texts.find((t: any) => t.id === selText) || null;
   return (
     <>
       <div className="panelHd">
         <h2>Text</h2>
-        <p>A display title set across the carousel.</p>
+        <p>Add titles, captions & signatures — drag them anywhere on the canvas.</p>
       </div>
+      <button type="button" className="bigAction" onClick={onAddText}>
+        {Ic.text}<span>Add text block</span>
+      </button>
       <div className="panelScroll">
-        <div className="field">
-          <label>Title</label>
-          <input type="text" className="textField" value={title} maxLength={40}
-            placeholder="e.g. CONVOCATION '26" onChange={(e) => onTitle(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Typeface</label>
-          <div className="fauxSelect disabled">Editorial Serif {Ic.chevron}</div>
-        </div>
-        <div className="field">
-          <label>Style</label>
-          <div className="segRow disabled">
-            <span className="fauxSeg on">Title</span>
-            <span className="fauxSeg">Subtitle</span>
-            <span className="fauxSeg">Caption</span>
+        {texts.length > 0 && (
+          <div className="textList">
+            {texts.map((t: any) => (
+              <button key={t.id} type="button"
+                className={"textListItem" + (t.id === selText ? " on" : "")}
+                onClick={() => onSelectText(t.id)} title="Edit block">
+                <span style={{ fontFamily: fontStack(t.font) }}>{t.text || "Empty"}</span>
+              </button>
+            ))}
           </div>
-        </div>
-        <SoonNote label="Multiple text blocks, fonts & color" />
+        )}
+
+        {sel ? (
+          <TextEditor key={sel.id} t={sel} onUpdate={onUpdateText} onRemove={onRemoveText} />
+        ) : (
+          <p className="inspHint" style={{ padding: "8px 4px 0" }}>
+            {texts.length ? "Select a block above to edit it." : "No text yet — add a block to get started."}
+          </p>
+        )}
       </div>
     </>
+  );
+}
+
+function TextEditor({ t, onUpdate, onRemove }: any) {
+  const set = (patch: any) => onUpdate(t.id, patch);
+  const cats = ["Serif", "Sans", "Script"] as const;
+  return (
+    <div className="textEditor">
+      <div className="field">
+        <label>Content</label>
+        <textarea className="textField textArea" value={t.text} rows={2}
+          placeholder="Type your text…" onChange={(e) => set({ text: e.target.value })} />
+      </div>
+
+      <div className="field">
+        <label>Font</label>
+        <select className="selectField" value={t.font} style={{ fontFamily: fontStack(t.font) }}
+          onChange={(e) => set({ font: e.target.value })}>
+          {cats.map(cat => (
+            <optgroup key={cat} label={cat}>
+              {FONTS.filter(f => f.cat === cat).map(f => (
+                <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>{f.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+
+      <InspGroup label="Color">
+        <div className="colorRow">
+          {TEXT_COLORS.map(c => (
+            <button key={c} type="button" title={c === "auto" ? "Auto (matches background)" : c}
+              className={"colorDot" + (t.color === c ? " on" : "") + (c === "auto" ? " auto" : "")}
+              style={c === "auto" ? undefined : { background: c }}
+              onClick={() => set({ color: c })}>{c === "auto" ? "A" : ""}</button>
+          ))}
+          <label className="colorDot custom" title="Custom color"
+            style={{ background: t.color !== "auto" && !TEXT_COLORS.includes(t.color) ? t.color : undefined }}>
+            +
+            <input type="color" value={t.color === "auto" ? "#ffffff" : t.color}
+              onChange={(e) => set({ color: e.target.value })} />
+          </label>
+        </div>
+      </InspGroup>
+
+      <InspGroup label={`Size · ${Math.round(t.size)}`}>
+        <input type="range" className="slider" min="24" max="320" step="1"
+          value={t.size} onChange={(e) => set({ size: Number(e.target.value) })} />
+      </InspGroup>
+
+      <InspGroup label={`Letter spacing · ${t.letterSpacing}`}>
+        <input type="range" className="slider" min="-5" max="30" step="0.5"
+          value={t.letterSpacing} onChange={(e) => set({ letterSpacing: Number(e.target.value) })} />
+      </InspGroup>
+
+      <InspGroup label="Weight">
+        <Seg full compact value={t.weight} onChange={(v: number) => set({ weight: v })} options={[
+          { value: 400, label: "Reg" }, { value: 500, label: "Med" },
+          { value: 600, label: "Semi" }, { value: 700, label: "Bold" }]} />
+      </InspGroup>
+
+      <InspGroup label="Align">
+        <Seg full compact value={t.align} onChange={(v: string) => set({ align: v })} options={[
+          { value: "left", label: "Left" }, { value: "center", label: "Center" },
+          { value: "right", label: "Right" }]} />
+      </InspGroup>
+
+      <div className="toggleRow">
+        <Toggle label="Italic" on={t.italic} onChange={(v: boolean) => set({ italic: v })} />
+        <Toggle label="UPPERCASE" on={t.upper} onChange={(v: boolean) => set({ upper: v })} />
+      </div>
+
+      <button type="button" className="lineBtn danger" onClick={() => onRemove(t.id)}>
+        {Ic.trash}<span>Delete block</span>
+      </button>
+    </div>
+  );
+}
+
+function Toggle({ label, on, onChange }: any) {
+  return (
+    <button type="button" className={"pillToggle" + (on ? " on" : "")}
+      onClick={() => onChange(!on)}>
+      <span className="pillBox">{on ? Ic.check : null}</span>{label}
+    </button>
   );
 }
 
@@ -393,7 +485,7 @@ export function InspGroup({ label, children }: any) {
 
 /* ============ BOTTOM SLIDE STRIP ============ */
 
-export function BottomStrip({ tpl, palette, bgStyle, texture, title, api, activePost, onSelectPost,
+export function BottomStrip({ tpl, palette, bgStyle, texture, texts, api, activePost, onSelectPost,
   onAddPost, n }: any) {
   const H = 60;
   const s = H / tpl.H;
@@ -411,7 +503,7 @@ export function BottomStrip({ tpl, palette, bgStyle, texture, title, api, active
               <span className="ssClip" style={{ width: slideW, height: H }}>
                 <span className="ssInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
                   <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                    texture={texture} title={title} s={s} api={{ ...api, interactive: false }} />
+                    texture={texture} texts={texts} s={s} api={{ ...api, interactive: false }} />
                 </span>
               </span>
               <em className="ssNum">{i + 1}</em>

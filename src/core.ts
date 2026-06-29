@@ -2,9 +2,69 @@
    Pure data: no canvas, no DOM, no React. Produces boxes/bands/decor
    in strip coordinates. Framework-agnostic — also consumed by export.ts. */
 
-import type { Box, Template, Palette, Enabled } from "./types";
+import type { Box, Template, Palette, Enabled, TextBlock } from "./types";
 
 export const SLIDE_W = 1080;
+
+/* ---------- typography ----------
+   Curated for photography / editorial Instagram carousels. Three families of
+   look photographers reach for: high-contrast display serifs (the wedding /
+   portfolio standard), clean geometric sans (set in spaced caps for captions
+   & branding), and signature scripts. All are Google Fonts (loaded in
+   index.html). */
+export interface FontDef {
+  id: string;
+  label: string;
+  stack: string;
+  cat: "Serif" | "Sans" | "Script";
+}
+
+export const FONTS: FontDef[] = [
+  // Display / editorial serifs — the classic photographer headline
+  { id: "playfair",  label: "Playfair Display", stack: "'Playfair Display', Georgia, serif", cat: "Serif" },
+  { id: "cormorant", label: "Cormorant Garamond", stack: "'Cormorant Garamond', Georgia, serif", cat: "Serif" },
+  { id: "ebgaramond",label: "EB Garamond", stack: "'EB Garamond', Georgia, serif", cat: "Serif" },
+  { id: "baskerville",label: "Libre Baskerville", stack: "'Libre Baskerville', Georgia, serif", cat: "Serif" },
+  { id: "dmserif",   label: "DM Serif Display", stack: "'DM Serif Display', Georgia, serif", cat: "Serif" },
+  { id: "italiana",  label: "Italiana", stack: "'Italiana', Georgia, serif", cat: "Serif" },
+  // Clean sans — captions, branding, spaced caps
+  { id: "montserrat",label: "Montserrat", stack: "'Montserrat', sans-serif", cat: "Sans" },
+  { id: "poppins",   label: "Poppins", stack: "'Poppins', sans-serif", cat: "Sans" },
+  { id: "jost",      label: "Jost", stack: "'Jost', sans-serif", cat: "Sans" },
+  { id: "josefin",   label: "Josefin Sans", stack: "'Josefin Sans', sans-serif", cat: "Sans" },
+  { id: "archivo",   label: "Archivo", stack: "'Archivo', sans-serif", cat: "Sans" },
+  { id: "inter",     label: "Inter", stack: "'Inter', sans-serif", cat: "Sans" },
+  // Signature scripts
+  { id: "dancing",   label: "Dancing Script", stack: "'Dancing Script', cursive", cat: "Script" },
+  { id: "sacramento",label: "Sacramento", stack: "'Sacramento', cursive", cat: "Script" },
+  { id: "greatvibes",label: "Great Vibes", stack: "'Great Vibes', cursive", cat: "Script" },
+];
+
+const FONT_BY_ID: Record<string, FontDef> = Object.fromEntries(FONTS.map(f => [f.id, f]));
+export const fontDef = (id: string): FontDef => FONT_BY_ID[id] || FONTS[0];
+export const fontStack = (id: string): string => fontDef(id).stack;
+/* a CSS font shorthand for canvas (no letter-spacing — caller applies it) */
+export const fontShorthand = (t: TextBlock, px: number): string =>
+  `${t.italic ? "italic " : ""}${t.weight} ${px}px ${fontStack(t.font)}`;
+
+let textId = Date.now();
+export function newTextBlock(partial: Partial<TextBlock> = {}): TextBlock {
+  return {
+    id: ++textId,
+    text: "Your text",
+    font: "playfair",
+    color: "auto",
+    size: 110,
+    weight: 600,
+    italic: false,
+    letterSpacing: 2,
+    align: "center",
+    upper: true,
+    x: SLIDE_W / 2,
+    y: 220,
+    ...partial,
+  };
+}
 
 /* Background colors the user picks from. ph/ink/text (placeholder fill,
    decor/line ink, title color) are derived from the bg via paletteFromBg

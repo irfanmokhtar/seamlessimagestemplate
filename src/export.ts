@@ -5,15 +5,15 @@
    React stores photos as src strings; the canvas path needs real
    HTMLImageElements, so loadImages() resolves them before drawing. */
 
-import { SLIDE_W, rgba, shade, rand, randInt, luminance, rotCover } from "./core";
-import type { Box, Template, Palette, Panzoom, BgStyle, Texture } from "./types";
+import { SLIDE_W, rgba, shade, rand, randInt, luminance, rotCover, fontStack, fontShorthand } from "./core";
+import type { Box, Template, Palette, Panzoom, BgStyle, Texture, TextBlock } from "./types";
 
 export interface ExportOpts {
   tpl: Template;
   palette: Palette;
   bgStyle: BgStyle;
   texture: Texture;
-  title: string;
+  texts: TextBlock[];
   photos: (string | null)[];
   panzoom: Record<number, Panzoom>;
   images: Map<string, HTMLImageElement>;
@@ -272,19 +272,24 @@ export function drawStrip(c: CanvasRenderingContext2D, s: number, o: ExportOpts)
     else drawPlaceholder(c, o, box, s, i + 1);
   });
 
-  // title
-  if (o.title.trim()) {
-    const x = T.n > 1 ? SLIDE_W : SLIDE_W / 2;
-    const size = 120 * (T.H / 1350);
+  // text blocks
+  const vs = T.H / 1350;
+  for (const t of o.texts || []) {
+    if (!t.text.trim()) continue;
+    const px = t.size * vs;
+    const ls = t.letterSpacing * vs;
     c.save();
-    c.font = `600 ${size * s}px Georgia, "Times New Roman", serif`;
-    if ("letterSpacing" in c) (c as any).letterSpacing = `${6 * s}px`;
-    c.textAlign = "center";
+    c.font = fontShorthand(t, px * s);
+    if ("letterSpacing" in c) (c as any).letterSpacing = `${ls * s}px`;
+    c.textAlign = t.align as CanvasTextAlign;
     c.textBaseline = "middle";
-    c.shadowColor = "rgba(0,0,0,0.25)";
+    c.shadowColor = "rgba(0,0,0,0.22)";
     c.shadowBlur = 14 * s;
-    c.fillStyle = p.text;
-    c.fillText(o.title.toUpperCase(), x * s, Math.max(size, T.H * 0.14) * s);
+    c.fillStyle = t.color === "auto" ? p.text : t.color;
+    const lines = (t.upper ? t.text.toUpperCase() : t.text).split("\n");
+    const lh = px * 1.1;
+    const y0 = t.y - (lines.length - 1) * lh / 2;
+    lines.forEach((line, k) => c.fillText(line, t.x * s, (y0 + k * lh) * s));
     c.restore();
   }
 
@@ -302,11 +307,30 @@ export function drawStrip(c: CanvasRenderingContext2D, s: number, o: ExportOpts)
   }
 }
 
+/* canvas can only draw a web font once the browser has actually loaded the
+   exact family+weight+style. Force-load each used variant, then wait. */
+async function ensureFonts(texts: TextBlock[]) {
+  const fd = (document as any).fonts;
+  if (!fd || !texts?.length) return;
+  const seen = new Set<string>();
+  for (const t of texts) {
+    if (!t.text.trim()) continue;
+    const spec = `${t.italic ? "italic " : ""}${t.weight} 64px ${fontStack(t.font)}`;
+    if (seen.has(spec)) continue;
+    seen.add(spec);
+    try { await fd.load(spec); } catch { /* fall back to system */ }
+  }
+  try { await fd.ready; } catch { /* ignore */ }
+}
+
 /* render the full strip, slice into per-post PNGs, trigger real downloads */
 export async function exportSlides(opts: Omit<ExportOpts, "images">) {
   const images = await loadImages(opts.photos);
   const o: ExportOpts = { ...opts, images };
   const T = o.tpl;
+
+  // make sure web fonts used by text blocks are rasterizable before drawing
+  await ensureFonts(o.texts);
 
   const full = document.createElement("canvas");
   drawStrip(full.getContext("2d")!, 1, o);

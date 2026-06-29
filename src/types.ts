@@ -49,6 +49,24 @@ export interface Panzoom {
 
 export type Enabled = Record<string, boolean>;
 
+/* A free text block placed in strip coordinates. x/y is the anchor point
+   (interpreted per `align`); size/letterSpacing are stored at the 1350-tall
+   baseline and scaled by vs=H/1350 at render. color "auto" = palette text. */
+export interface TextBlock {
+  id: number;
+  text: string;
+  font: string;          // FontDef.id
+  color: string;         // hex, or "auto"
+  size: number;          // px @ H=1350
+  weight: number;        // 400 | 500 | 600 | 700
+  italic: boolean;
+  letterSpacing: number; // px @ H=1350
+  align: "left" | "center" | "right";
+  upper: boolean;
+  x: number;             // strip coords (anchor)
+  y: number;             // strip coords (vertical center)
+}
+
 export type BgStyle = "flat" | "gradient" | "blurpano";
 export type Texture = "none" | "grain" | "paper";
 export type ViewMode = "strip" | "posts";
@@ -67,4 +85,9 @@ export interface StripApi {
   onPan?: (i: number, dx: number, dy: number, box: Box) => void;
   onZoom?: (i: number, f: number) => void;
   onRotate?: (i: number, dDeg: number, box: Box) => void;
+  // text blocks
+  texts?: TextBlock[];
+  selText?: number | null;
+  onTextSelect?: (id: number) => void;
+  onTextMove?: (id: number, dx: number, dy: number) => void;
 }

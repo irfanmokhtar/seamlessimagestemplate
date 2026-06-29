@@ -6,8 +6,8 @@
    transition — the seamless concept, demonstrated by the UI itself. */
 
 import React from "react";
-import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover } from "./core";
-import type { Box, Palette, Panzoom, StripApi } from "./types";
+import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover, fontStack } from "./core";
+import type { Box, Palette, Panzoom, StripApi, TextBlock } from "./types";
 
 const GRAIN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
 const PAPER_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04 0.09' numOctaves='3'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23p)'/%3E%3C/svg%3E\")";
@@ -182,20 +182,81 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   );
 }
 
+/* ---------- a free text block ---------- */
+
+function TextItem({ t, s, vs, palette, api }: {
+  t: TextBlock; s: number; vs: number; palette: Palette; api: StripApi;
+}) {
+  const drag = React.useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const selected = !!api.interactive && api.selText === t.id;
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!api.interactive || e.button !== 0) return;
+    e.stopPropagation();
+    drag.current = { x: e.clientX, y: e.clientY, moved: false };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    const dx = (e.clientX - drag.current.x) / s;
+    const dy = (e.clientY - drag.current.y) / s;
+    if (Math.abs(dx) + Math.abs(dy) > 0) drag.current.moved = true;
+    drag.current.x = e.clientX;
+    drag.current.y = e.clientY;
+    api.onTextMove?.(t.id, dx, dy);
+  };
+  const onPointerUp = () => { setTimeout(() => { drag.current = null; }, 0); };
+  const onClick = (e: React.MouseEvent) => {
+    if (!api.interactive) return;
+    e.stopPropagation();
+    if (drag.current && drag.current.moved) return;
+    api.onTextSelect?.(t.id);
+  };
+
+  const anchorX = t.align === "center" ? "-50%" : t.align === "right" ? "-100%" : "0";
+  const style: React.CSSProperties = {
+    position: "absolute",
+    left: t.x * s, top: t.y * s,
+    transform: `translate(${anchorX}, -50%)`,
+    fontFamily: fontStack(t.font),
+    fontWeight: t.weight,
+    fontStyle: t.italic ? "italic" : "normal",
+    fontSize: t.size * vs * s,
+    letterSpacing: t.letterSpacing * vs * s,
+    textAlign: t.align,
+    color: t.color === "auto" ? palette.text : t.color,
+    whiteSpace: "pre",
+    lineHeight: 1.1,
+    zIndex: 20,
+    textShadow: "0 2px 14px rgba(0,0,0,0.22)",
+    cursor: api.interactive ? "move" : "default",
+    pointerEvents: api.interactive ? "auto" : "none",
+    userSelect: "none",
+  };
+
+  return (
+    <div className={"textBlock" + (selected ? " selected" : "")} style={style}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp} onClick={onClick}>
+      {t.upper ? t.text.toUpperCase() : t.text}
+    </div>
+  );
+}
+
 /* ---------- full strip content (one copy per slide window) ---------- */
 
-export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, selected }: any) {
+export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, selected }: any) {
   const stripW = tpl.n * SLIDE_W * s;
   const H = tpl.H * s;
   const p: Palette = palette;
   const firstSrc = api.photos.find(Boolean) || null;
+  const vs = tpl.H / 1350;
 
   let bg = p.bg;
   if (bgStyle === "gradient") {
     bg = `linear-gradient(135deg, ${shade(p.bg, 0.04)}, ${shade(p.bg, -0.06)})`;
   }
   const bandColor = p.name === "Charcoal" ? "#000000" : "#1B1B1B";
-  const titleSize = 120 * (tpl.H / 1350) * s;
 
   return (
     <div className="stripContent" style={{ width: stripW, height: H, background: bg }}>
@@ -262,16 +323,10 @@ export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, se
           selected={selected === i} />
       ))}
 
-      {/* title */}
-      {title.trim() && (
-        <div className="stripTitle" style={{
-          left: (tpl.n > 1 ? SLIDE_W : SLIDE_W / 2) * s,
-          top: Math.max(titleSize / s, tpl.H * 0.14) * s,
-          fontSize: titleSize,
-          letterSpacing: 6 * s,
-          color: p.text,
-        }}>{title.toUpperCase()}</div>
-      )}
+      {/* text blocks */}
+      {(texts || []).map((t: TextBlock) => (
+        <TextItem key={t.id} t={t} s={s} vs={vs} palette={p} api={api} />
+      ))}
 
       {/* texture */}
       {texture !== "none" && (
@@ -288,7 +343,7 @@ export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, se
 
 /* ---------- strip stage: slide windows that pull apart ---------- */
 
-export function StripStage({ tpl, palette, bgStyle, texture, title, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect }: any) {
+export function StripStage({ tpl, palette, bgStyle, texture, texts, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect }: any) {
   const wrapRef = React.useRef<HTMLDivElement>(null);
   const [avail, setAvail] = React.useState({ w: 1200, h: 600 });
 
@@ -319,7 +374,8 @@ export function StripStage({ tpl, palette, bgStyle, texture, title, viewMode, sh
       onDrop={(e) => { e.preventDefault(); onStageDrop(e); }}>
       <div className="stageScroll"
         onPointerDown={(e) => {
-          if (onClearSelect && !(e.target as HTMLElement).closest(".photoBox")) onClearSelect();
+          const el = e.target as HTMLElement;
+          if (onClearSelect && !el.closest(".photoBox") && !el.closest(".textBlock")) onClearSelect();
         }}>
         <div className={"stage" + (posts ? " postsMode" : "")}
           style={{ width: totalW, height: tpl.H * s + (posts ? captionH : 0) }}>
@@ -329,7 +385,7 @@ export function StripStage({ tpl, palette, bgStyle, texture, title, viewMode, sh
               style={{ left: i * (slideW + gap), width: slideW, height: tpl.H * s }}>
               <div className="slideInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
                 <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                  texture={texture} title={title} s={s} api={api} selected={selected} />
+                  texture={texture} texts={texts} s={s} api={api} selected={selected} />
               </div>
               {showGuides && !posts && i > 0 && <div className="boundaryGuide"></div>}
               <div className="slideChip">{i + 1}</div>
