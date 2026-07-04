@@ -1,12 +1,21 @@
-/* app.tsx — Seamless editor: state, wiring, layout. */
+/* app.tsx — Seamless editor: state, wiring, layout.
+   Screens: gallery (saved projects, IndexedDB) ⇄ editor (one doc, autosaved). */
 
 import React from "react";
-import { PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate, resizeTemplate, newTextBlock } from "./core";
+import {
+  PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate, resizeTemplate,
+  shuffleTemplate, setSlideLayout, addSlot, removeSlot, newTextBlock,
+  encodeLook, decodeLook, newSeed,
+} from "./core";
 import { clampPan } from "./strip";
 import { StripStage } from "./strip";
 import { TopBar, LeftRail, LeftPanel, Inspector, BottomStrip } from "./panels";
 import { ExportModal, Toast } from "./modal";
-import type { Box, Enabled, BgStyle, Texture, ViewMode, TextBlock } from "./types";
+import { Gallery } from "./gallery";
+import {
+  DocRecord, putDoc, getAllDocs, deleteDoc, newId, putPhoto, loadPhotoUrls, gcPhotos,
+} from "./store";
+import type { Box, Enabled, BgStyle, Texture, ViewMode, TextBlock, Template } from "./types";
 
 const ALL_KEYS = [...Object.keys(PATTERNS), ...DECOR_KEYS];
 // ribbon + circles decor start off — they read as busy on a fresh canvas
@@ -15,6 +24,8 @@ const defaultEnabled = (): Enabled =>
 
 const ACCENT = "#1E9E72";
 const MORPH_MS = 600;
+const MIN_BOX = 160;   // strip px
+const SNAP_TOL = 14;   // strip px
 
 const STORE_KEY = "seamless_settings";
 const THEME_KEY = "seamless_theme";
@@ -27,6 +38,25 @@ function loadSettings(): any {
 }
 const saved = loadSettings();
 
+/* Rearrange an index-keyed asset array to follow a box-index map produced by
+   shuffleTemplate/setSlideLayout: kept boxes keep their asset, new boxes soak
+   up the displaced assets in order. */
+function remapArr<T>(old: (T | null)[], map: number[]): (T | null)[] {
+  const used = new Set(map.filter(m => m >= 0));
+  const leftovers: T[] = [];
+  old.forEach((v, i) => { if (v != null && !used.has(i)) leftovers.push(v as T); });
+  return map.map(m => (m >= 0 ? old[m] ?? null : leftovers.shift() ?? null));
+}
+
+const snapTo = (v: number, targets: number[], tol = SNAP_TOL) => {
+  let best = v, bd = tol;
+  for (const t of targets) {
+    const d = Math.abs(v - t);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best;
+};
+
 export function App() {
   const [ready, setReady] = React.useState(false);
   React.useEffect(() => {
@@ -38,6 +68,11 @@ export function App() {
     () => localStorage.getItem(THEME_KEY) || "dark");
   React.useEffect(() => { localStorage.setItem(THEME_KEY, theme); }, [theme]);
 
+  /* ----- screens + docs ----- */
+  const [screen, setScreen] = React.useState<"loading" | "gallery" | "editor">("loading");
+  const [docs, setDocs] = React.useState<DocRecord[]>([]);
+  const [docId, setDocId] = React.useState<string | null>(null);
+
   const [docName, setDocName] = React.useState("Untitled carousel");
   const [n, setN] = React.useState(5);
   const [H, setH] = React.useState(1350);
@@ -46,26 +81,26 @@ export function App() {
   const [bgStyle, setBgStyle] = React.useState<BgStyle>(
     () => saved.bgStyle === "white" ? "flat" : (saved.bgStyle || "flat"));
   const [texture, setTexture] = React.useState<Texture>(() => saved.texture || "grain");
-  const [texts, setTexts] = React.useState<TextBlock[]>(() => {
-    if (Array.isArray(saved.texts)) return saved.texts.map((t: any) => ({ ...newTextBlock(), ...t }));
-    if (typeof saved.title === "string" && saved.title.trim())
-      return [newTextBlock({ text: saved.title })];
-    return [];
-  });
+  const [texts, setTexts] = React.useState<TextBlock[]>([]);
   const [enabled, setEnabled] = React.useState<Enabled>(
     () => ({ ...defaultEnabled(), ...(saved.enabled || {}) }));
+  const [locks, setLocks] = React.useState<boolean[]>([]);
 
-  // persist settings (theme persists separately)
+  // global defaults for new docs (theme persists separately; docs persist in IndexedDB)
   React.useEffect(() => {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ enabled, bgStyle, texture, texts, paletteIdx }));
-  }, [enabled, bgStyle, texture, texts, paletteIdx]);
+    localStorage.setItem(STORE_KEY, JSON.stringify({ enabled, bgStyle, texture, paletteIdx }));
+  }, [enabled, bgStyle, texture, paletteIdx]);
 
-  const [history, setHistory] = React.useState(
+  const [history, setHistory] = React.useState<Template[]>(
     () => [generateTemplate(5, 1350, { ...defaultEnabled(), ...(saved.enabled || {}) })]);
   const [cursor, setCursor] = React.useState(0);
-  const tpl = history[cursor];
+  const [draft, setDraft] = React.useState<Template | null>(null); // live box-edit gesture
+  const draftRef = React.useRef<Template | null>(null);
+  const setDraft2 = (t: Template | null) => { draftRef.current = t; setDraft(t); };
+  const tpl = draft ?? history[cursor];
 
   const [photos, setPhotos] = React.useState<(string | null)[]>(() => []);
+  const [photoIds, setPhotoIds] = React.useState<(string | null)[]>(() => []);
   const [panzoom, setPanzoom] = React.useState<Record<number, any>>({});
   const [viewMode, setViewMode] = React.useState<ViewMode>("strip");
   const [tab, setTab] = React.useState("layouts");
@@ -86,8 +121,120 @@ export function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 3200);
   };
 
+  /* ----- boot: share link → fresh doc; else gallery ----- */
+  React.useEffect(() => {
+    const m = location.hash.match(/^#look=(.+)$/);
+    if (m) {
+      const look = decodeLook(m[1]);
+      history_replaceHash();
+      if (look) {
+        openNewDoc(look);
+        showToast("Shared look loaded — drop in your photos");
+        return;
+      }
+    }
+    getAllDocs()
+      .then(ds => { setDocs(ds); setScreen("gallery"); })
+      .catch(() => setScreen("gallery"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const history_replaceHash = () =>
+    window.history.replaceState(null, "", location.pathname + location.search);
+
+  /* ----- doc lifecycle ----- */
+  const hydrate = (rec: DocRecord, urls: (string | null)[]) => {
+    setDocId(rec.id);
+    setDocName(rec.name);
+    setHistory(rec.history?.length ? rec.history : [generateTemplate(rec.n, rec.H, rec.enabled)]);
+    setCursor(Math.min(rec.cursor ?? 0, (rec.history?.length ?? 1) - 1));
+    setDraft2(null);
+    setN(rec.n); setH(rec.H);
+    setPaletteIdx(PALETTES[rec.paletteIdx] ? rec.paletteIdx : 0);
+    setBgStyle(rec.bgStyle || "flat");
+    setTexture(rec.texture || "grain");
+    setEnabled({ ...defaultEnabled(), ...(rec.enabled || {}) });
+    setTexts(Array.isArray(rec.texts) ? rec.texts : []);
+    setPanzoom(rec.panzoom || {});
+    setLocks(rec.locks || []);
+    setPhotoIds(rec.photoIds || []);
+    setPhotos(urls);
+    setSelected(null); setSelText(null);
+    setViewMode("strip"); setTab("layouts");
+    setScreen("editor");
+  };
+
+  const openDoc = async (rec: DocRecord) => {
+    const urls = await loadPhotoUrls(rec.photoIds || []);
+    hydrate(rec, urls);
+  };
+
+  const openNewDoc = (look?: ReturnType<typeof decodeLook>) => {
+    const en = look?.enabled ? { ...defaultEnabled(), ...look.enabled } : { ...defaultEnabled(), ...(saved.enabled || {}) };
+    const nn = look?.n ?? 5;
+    const hh = look?.H ?? 1350;
+    const tpl0 = generateTemplate(nn, hh, en, look?.seed);
+    const rec: DocRecord = {
+      id: newId(),
+      name: "Untitled carousel",
+      updatedAt: Date.now(),
+      history: [tpl0],
+      cursor: 0,
+      n: nn, H: hh,
+      paletteIdx: look?.paletteIdx ?? paletteIdx,
+      bgStyle: (look?.bgStyle as BgStyle) ?? bgStyle,
+      texture: (look?.texture as Texture) ?? texture,
+      enabled: en,
+      texts: look?.texts ?? [],
+      panzoom: {},
+      photoIds: [],
+      locks: [],
+    };
+    hydrate(rec, []);
+  };
+
+  /* autosave (debounced) — everything a doc needs to reopen exactly */
+  const saveTimer = React.useRef<number | undefined>(undefined);
+  const buildRec = (): DocRecord | null => {
+    if (!docId) return null;
+    return {
+      id: docId, name: docName, updatedAt: Date.now(),
+      history, cursor, n, H, paletteIdx, bgStyle, texture, enabled,
+      texts, panzoom, photoIds, locks,
+    };
+  };
+  const buildRecRef = React.useRef(buildRec);
+  buildRecRef.current = buildRec;
+  React.useEffect(() => {
+    if (screen !== "editor" || !docId) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      const rec = buildRecRef.current();
+      if (rec) putDoc(rec).catch(() => { /* quota/blocked — editor keeps working */ });
+    }, 800);
+    return () => clearTimeout(saveTimer.current);
+  }, [screen, docId, docName, history, cursor, n, H, paletteIdx, bgStyle, texture,
+    enabled, texts, panzoom, photoIds, locks]);
+
+  const goHome = async () => {
+    const rec = buildRecRef.current();
+    if (rec) await putDoc(rec).catch(() => {});
+    const ds = await getAllDocs().catch(() => [] as DocRecord[]);
+    setDocs(ds);
+    setScreen("gallery");
+  };
+
+  const duplicateDoc = async (d: DocRecord) => {
+    const copy: DocRecord = { ...d, id: newId(), name: d.name + " copy", updatedAt: Date.now() };
+    await putDoc(copy);
+    setDocs(await getAllDocs());
+  };
+  const removeDoc = async (d: DocRecord) => {
+    await deleteDoc(d.id);
+    setDocs(await getAllDocs());
+  };
+
   /* ----- template + history (undo / redo) ----- */
-  const pushTemplate = (newTpl: any, preserve = false) => {
+  const pushTemplate = (newTpl: Template, preserve = false) => {
     setHistory(h => {
       const trimmed = h.slice(0, cursor + 1);
       const next = [...trimmed, newTpl];
@@ -97,33 +244,63 @@ export function App() {
     if (!preserve) { setPanzoom({}); setSelected(null); }
   };
 
+  const applyMap = (map: number[]) => {
+    setPhotos(prev => remapArr(prev, map));
+    setPhotoIds(prev => remapArr(prev, map));
+    setPanzoom(prev => {
+      const nx: Record<number, any> = {};
+      map.forEach((m, j) => { if (m >= 0 && prev[m]) nx[j] = prev[m]; });
+      return nx;
+    });
+  };
+
   const regenerate = (nn = n, hh = H, en = enabled) => {
     setSpinning(true);
     setTimeout(() => setSpinning(false), 700);
-    pushTemplate(generateTemplate(nn, hh, en));
+    if (nn === tpl.n && hh === tpl.H) {
+      // shuffle in place — locked slides keep boxes AND their photos
+      const { tpl: next, map } = shuffleTemplate(tpl, en, locks);
+      if (map) { applyMap(map); pushTemplate(next, true); setSelected(null); }
+      else pushTemplate(next);
+    } else {
+      pushTemplate(generateTemplate(nn, hh, en));
+    }
   };
 
   const jumpTo = (i: number) => {
     const target = history[i];
     setCursor(i); setN(target.n); setH(target.H);
+    setDraft2(null);
     setPanzoom({}); setSelected(null);
   };
   const undo = () => { if (cursor > 0) jumpTo(cursor - 1); };
   const redo = () => { if (cursor < history.length - 1) jumpTo(cursor + 1); };
 
+  /* ----- keyboard ----- */
   React.useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      const t = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (t === "input" || t === "textarea") {
-        if (e.key === "Escape") (e.target as HTMLElement).blur();
+      const el = e.target as HTMLElement;
+      const t = el?.tagName?.toLowerCase();
+      if (t === "input" || t === "textarea" || el?.isContentEditable) {
+        if (e.key === "Escape" && !el.isContentEditable) el.blur();
         return;
       }
+      if (screen !== "editor") return;
       const z = e.key.toLowerCase() === "z";
       if ((e.metaKey || e.ctrlKey) && z) {
         e.preventDefault();
         if (e.shiftKey) redo(); else undo();
       } else if (e.key === "Escape") {
         setSelected(null); setSelText(null);
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        if (selText != null) { e.preventDefault(); removeText(selText); }
+        else if (selected != null) { e.preventDefault(); deleteSlot(selected); }
+      } else if (e.key.startsWith("Arrow") && selText != null) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        setTexts(ts => ts.map(tb => tb.id === selText ? { ...tb, x: tb.x + dx, y: tb.y + dy } : tb));
       }
     };
     window.addEventListener("keydown", h);
@@ -132,6 +309,7 @@ export function App() {
 
   const changeN = (v: number) => {
     setN(v);
+    setLocks(l => l.slice(0, v));
     pushTemplate(resizeTemplate(tpl, v, H, enabled), true);
   };
   const changeH = (v: number) => { setH(v); regenerate(n, v, enabled); };
@@ -140,40 +318,172 @@ export function App() {
     setEnabled(next); regenerate(n, H, next);
   };
 
+  /* ----- locks + per-slide layout ----- */
+  const toggleLock = (i: number) => {
+    setLocks(l => {
+      const nx = l.slice();
+      while (nx.length < n) nx.push(false);
+      nx[i] = !nx[i];
+      return nx;
+    });
+  };
+  const pickLayout = (slide: number, type: string) => {
+    const { tpl: next, map } = setSlideLayout(tpl, slide, type);
+    applyMap(map);
+    pushTemplate(next, true);
+    setSelected(null);
+  };
+
   /* ----- zoom ----- */
   const zoomStep = (dir: number) => setZoom(z => clamp(dir > 0 ? z * 1.15 : z / 1.15, 0.4, 3));
   const fitZoom = () => setZoom(1);
 
-  /* ----- photos ----- */
-  const fillEmpty = (srcs: string[]) => {
+  /* ----- photos (stored as blobs in IndexedDB, object URLs in state) ----- */
+  const registerFile = async (file: File): Promise<{ id: string; url: string }> => {
+    const id = newId();
+    putPhoto(id, file).catch(() => {});
+    return { id, url: URL.createObjectURL(file) };
+  };
+
+  const setSlotPhoto = async (i: number, file: File) => {
+    const { id, url } = await registerFile(file);
+    setPhotos(prev => { const nx = [...prev]; nx[i] = url; return nx; });
+    setPhotoIds(prev => { const nx = [...prev]; nx[i] = id; return nx; });
+    setPanzoom(pz => { const nx = { ...pz }; delete nx[i]; return nx; });
+  };
+
+  const fillEmpty = async (files: File[]) => {
+    const entries = await Promise.all(files.map(registerFile));
+    let placed = 0;
     setPhotos(prev => {
       const next = [...prev];
       let cur = 0;
-      for (let i = 0; i < tpl.boxes.length && cur < srcs.length; i++) {
-        if (!next[i]) next[i] = srcs[cur++];
+      for (let i = 0; i < tpl.boxes.length && cur < entries.length; i++) {
+        if (!next[i]) next[i] = entries[cur++].url;
       }
-      if (cur < srcs.length) showToast("All slots are full — ⌥ click a photo to free one");
-      else showToast(`Added ${srcs.length} photo${srcs.length > 1 ? "s" : ""}`);
+      placed = cur;
       return next;
     });
+    setPhotoIds(prev => {
+      const next = [...prev];
+      let cur = 0;
+      for (let i = 0; i < tpl.boxes.length && cur < entries.length; i++) {
+        if (!next[i]) next[i] = entries[cur++].id;
+      }
+      return next;
+    });
+    if (placed < entries.length) showToast("All slots are full — ⌥ click a photo to free one");
+    else showToast(`Added ${entries.length} photo${entries.length > 1 ? "s" : ""}`);
   };
 
   const onPickerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files || [])].filter(f => f.type.startsWith("image/"));
     e.target.value = "";
     if (!files.length) return;
-    const srcs = files.map(f => URL.createObjectURL(f));
     const slot = pendingSlot.current;
     pendingSlot.current = null;
-    if (slot !== null && srcs.length === 1) {
-      setPhotos(prev => { const nx = [...prev]; nx[slot] = srcs[0]; return nx; });
-      setPanzoom(pz => { const nx = { ...pz }; delete nx[slot]; return nx; });
-    } else {
-      fillEmpty(srcs);
-    }
+    if (slot !== null && files.length === 1) setSlotPhoto(slot, files[0]);
+    else fillEmpty(files);
   };
 
   const openPicker = (slot: number | null) => { pendingSlot.current = slot; pickerRef.current?.click(); };
+
+  const swapSlots = (i: number, j: number) => {
+    if (i === j) return;
+    const sw = <T,>(arr: (T | null)[]) => {
+      const nx = [...arr];
+      while (nx.length <= Math.max(i, j)) nx.push(null);
+      [nx[i], nx[j]] = [nx[j], nx[i]];
+      return nx;
+    };
+    setPhotos(sw); setPhotoIds(sw);
+    setPanzoom(pz => {
+      const nx = { ...pz };
+      const a = nx[i]; const b = nx[j];
+      if (b) nx[i] = b; else delete nx[i];
+      if (a) nx[j] = a; else delete nx[j];
+      return nx;
+    });
+    showToast(`Swapped slots ${i + 1} ↔ ${j + 1}`);
+  };
+
+  /* ----- direct box manipulation (draft = live gesture, commit on release) ----- */
+  const stripW = tpl.n * SLIDE_W;
+  const snapTargets = (skip: number) => {
+    const xs: number[] = [], ys: number[] = [0, tpl.H];
+    for (let k = 0; k <= tpl.n; k++) xs.push(k * SLIDE_W);
+    tpl.boxes.forEach((b, k) => {
+      if (k === skip) return;
+      xs.push(b.x, b.x + b.w);
+      ys.push(b.y, b.y + b.h);
+    });
+    return { xs, ys };
+  };
+
+  const editBox = (i: number, fn: (b: Box) => Box) => {
+    const base = draftRef.current ?? history[cursor];
+    const boxes = base.boxes.slice();
+    if (!boxes[i]) return;
+    boxes[i] = { ...fn(boxes[i]), manual: true };
+    setDraft2({ ...base, boxes });
+  };
+
+  const onBoxMove = (i: number, dx: number, dy: number) => editBox(i, b => {
+    const { xs, ys } = snapTargets(i);
+    let x = b.x + dx, y = b.y + dy;
+    const sx = snapTo(x, xs); if (sx !== x) x = sx;
+    else { const sr = snapTo(x + b.w, xs); if (sr !== x + b.w) x = sr - b.w; }
+    const sy = snapTo(y, ys); if (sy !== y) y = sy;
+    else { const sb = snapTo(y + b.h, ys); if (sb !== y + b.h) y = sb - b.h; }
+    x = clamp(x, 0, stripW - b.w);
+    y = clamp(y, 0, tpl.H - b.h);
+    return { ...b, x: Math.round(x), y: Math.round(y) };
+  });
+
+  const onBoxResize = (i: number, corner: string, dx: number, dy: number) => editBox(i, b => {
+    const { xs, ys } = snapTargets(i);
+    let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+    if (corner.includes("l")) x0 = snapTo(clamp(x0 + dx, 0, x1 - MIN_BOX), xs);
+    if (corner.includes("r")) x1 = snapTo(clamp(x1 + dx, x0 + MIN_BOX, stripW), xs);
+    if (corner.includes("t")) y0 = snapTo(clamp(y0 + dy, 0, y1 - MIN_BOX), ys);
+    if (corner.includes("b")) y1 = snapTo(clamp(y1 + dy, y0 + MIN_BOX, tpl.H), ys);
+    if (x1 - x0 < MIN_BOX || y1 - y0 < MIN_BOX) return b;
+    return { ...b, x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) };
+  });
+
+  const onBoxEditEnd = () => {
+    const d = draftRef.current;
+    if (!d) return;
+    setDraft2(null);
+    pushTemplate(d, true); // one undo step per gesture
+  };
+
+  const deleteSlot = (i: number) => {
+    if (!tpl.boxes[i]) return;
+    const next = removeSlot(tpl, i);
+    // assets follow their boxes: splice the same index out of every parallel store
+    setPhotos(prev => prev.filter((_, k) => k !== i));
+    setPhotoIds(prev => prev.filter((_, k) => k !== i));
+    setPanzoom(prev => {
+      const nx: Record<number, any> = {};
+      Object.entries(prev).forEach(([k, v]) => {
+        const ki = Number(k);
+        if (ki === i) return;
+        nx[ki > i ? ki - 1 : ki] = v;
+      });
+      return nx;
+    });
+    setSelected(null);
+    pushTemplate(next, true);
+    showToast("Slot removed");
+  };
+
+  const addSlotHere = () => {
+    const slide = activePost ?? 0;
+    pushTemplate(addSlot(tpl, slide), true);
+    setSelected(tpl.boxes.length); // the appended box
+    showToast("Slot added — ⌘-drag to move, corners to resize");
+  };
 
   const api = {
     photos, panzoom, interactive: true,
@@ -181,15 +491,14 @@ export function App() {
     onTextSelect: (id: number) => { setSelText(id); setSelected(null); setTab("text"); },
     onTextMove: (id: number, dx: number, dy: number) =>
       setTexts(ts => ts.map(t => t.id === id ? { ...t, x: t.x + dx, y: t.y + dy } : t)),
+    onTextEdit: (id: number, text: string) =>
+      setTexts(ts => ts.map(t => t.id === id ? { ...t, text } : t)),
     onSelect: (i: number) => { setSelected(i); setSelText(null); },
     onSlotClick: (i: number) => openPicker(i),
-    onDropFile: (i: number, file: File) => {
-      const src = URL.createObjectURL(file);
-      setPhotos(prev => { const nx = [...prev]; nx[i] = src; return nx; });
-      setPanzoom(pz => { const nx = { ...pz }; delete nx[i]; return nx; });
-    },
+    onDropFile: (i: number, file: File) => { setSlotPhoto(i, file); },
     onRemove: (i: number) => {
       setPhotos(prev => { const nx = [...prev]; nx[i] = null; return nx; });
+      setPhotoIds(prev => { const nx = [...prev]; nx[i] = null; return nx; });
       setPanzoom(pz => { const nx = { ...pz }; delete nx[i]; return nx; });
       showToast("Photo removed");
     },
@@ -214,6 +523,8 @@ export function App() {
         return { ...pz, [i]: clampPan(box, { ...cur, r }, photos[i]) };
       });
     },
+    onBoxMove, onBoxResize, onBoxEditEnd,
+    onSwap: swapSlots,
   };
 
   /* inspector actions */
@@ -233,10 +544,12 @@ export function App() {
   });
 
   /* ----- text blocks ----- */
-  const addText = () => {
+  const addText = (partial: Partial<TextBlock> = {}) => {
     // drop new block near the top-centre of the post currently in view
     const slide = activePost ?? 0;
-    const block = newTextBlock({ x: slide * SLIDE_W + SLIDE_W / 2, y: H * 0.16 });
+    const block = newTextBlock({
+      x: slide * SLIDE_W + SLIDE_W / 2, y: H * 0.16, ...partial,
+    });
     setTexts(ts => [...ts, block]);
     setSelText(block.id); setSelected(null);
     if (tab !== "text") setTab("text");
@@ -247,11 +560,33 @@ export function App() {
     setTexts(ts => ts.filter(t => t.id !== id));
     setSelText(s => s === id ? null : s);
   };
+  const duplicateText = (id: number) => {
+    const src = texts.find(t => t.id === id);
+    if (!src) return;
+    const { id: _omit, ...rest } = src;
+    const block = newTextBlock({ ...rest, x: src.x + 40, y: src.y + 40 });
+    setTexts(ts => [...ts, block]);
+    setSelText(block.id);
+  };
   const selectText = (id: number) => { setSelText(id); setSelected(null); };
+
+  /* ----- share look ----- */
+  const shareLook = async () => {
+    const code = encodeLook({
+      seed: tpl.seed ?? newSeed(), n, H, enabled, paletteIdx, bgStyle, texture, texts,
+    });
+    const url = `${location.origin}${location.pathname}#look=${code}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Share link copied — same layout, colors & text on open");
+    } catch {
+      window.prompt("Copy this share link:", url);
+    }
+  };
 
   const onStageDrop = (e: React.DragEvent) => {
     const files = [...e.dataTransfer.files].filter(f => f.type.startsWith("image/"));
-    if (files.length) fillEmpty(files.map(f => URL.createObjectURL(f)));
+    if (files.length) fillEmpty(files);
   };
 
   const selectPost = (i: number) => {
@@ -271,6 +606,22 @@ export function App() {
   const offCount = ALL_KEYS.filter(k => enabled[k] === false).length;
   const activePost = selected != null && tpl.boxes[selected] ? tpl.boxes[selected].slide : null;
 
+  if (screen === "loading") {
+    return <div className="editor" data-theme={theme} />;
+  }
+
+  if (screen === "gallery") {
+    return (
+      <>
+        <Gallery docs={docs} theme={theme}
+          onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onOpen={openDoc} onNew={() => openNewDoc()}
+          onDelete={removeDoc} onDuplicate={duplicateDoc} />
+        <Toast toast={toast} />
+      </>
+    );
+  }
+
   return (
     <div className={"editor" + (ready ? " ready" : "")} data-theme={theme}
       data-dots="1"
@@ -282,7 +633,8 @@ export function App() {
         zoom={zoom} onZoomStep={zoomStep} onFit={fitZoom}
         viewMode={viewMode} onViewMode={setViewMode}
         onExport={() => setExportOpen(true)}
-        onShuffle={() => regenerate()} spinning={spinning} />
+        onShuffle={() => regenerate()} spinning={spinning}
+        onHome={goHome} />
 
       <div className="editorBody">
         <LeftRail tab={tab} onTab={setTab} />
@@ -291,8 +643,9 @@ export function App() {
           onShuffle={() => regenerate()} spinning={spinning}
           tpl={tpl} photos={photos} onAddPhotos={() => openPicker(null)}
           onSelectSlot={(i: number) => { setSelected(i); setSelText(null); }} selected={selected}
+          onSwapSlots={swapSlots} onAddSlot={addSlotHere}
           texts={texts} selText={selText} onAddText={addText} onUpdateText={updateText}
-          onRemoveText={removeText} onSelectText={selectText}
+          onRemoveText={removeText} onSelectText={selectText} onDuplicateText={duplicateText}
           panzoom={panzoom} onStraighten={onStraighten} onFitPhoto={onFitPhoto} />
 
         <div className="workspace">
@@ -304,7 +657,8 @@ export function App() {
           </main>
           <BottomStrip tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
             texts={texts} api={api} activePost={activePost} onSelectPost={selectPost}
-            onAddPost={addPost} n={n} />
+            onAddPost={addPost} n={n}
+            locks={locks} onToggleLock={toggleLock} onPickLayout={pickLayout} />
         </div>
 
         <Inspector selected={selected} tpl={tpl} photos={photos} panzoom={panzoom}
@@ -313,14 +667,16 @@ export function App() {
           onBgStyle={setBgStyle} onTexture={setTexture}
           onReplace={openPicker} onRemove={api.onRemove}
           onZoomTo={onZoomTo} onNudge={onNudge} onFitPhoto={onFitPhoto}
-          onStraighten={onStraighten} />
+          onStraighten={onStraighten}
+          onShare={shareLook} onDeleteSlot={deleteSlot} />
       </div>
 
       <ExportModal open={exportOpen} onClose={() => setExportOpen(false)}
         tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} texts={texts} api={api}
-        onConfirm={() => {
+        docName={docName}
+        onConfirm={(msg: string) => {
           setExportOpen(false);
-          showToast(`${tpl.n} PNGs downloaded — upload them in order as one carousel`);
+          showToast(msg);
         }} />
 
       <Toast toast={toast} />

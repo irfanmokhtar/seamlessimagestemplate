@@ -5,6 +5,7 @@
    React stores photos as src strings; the canvas path needs real
    HTMLImageElements, so loadImages() resolves them before drawing. */
 
+import { zipSync } from "fflate";
 import { SLIDE_W, rgba, shade, rand, randInt, luminance, rotCover, fontStack, fontShorthand } from "./core";
 import type { Box, Template, Palette, Panzoom, BgStyle, Texture, TextBlock } from "./types";
 
@@ -191,12 +192,19 @@ function drawBlurBg(c: CanvasRenderingContext2D, o: ExportOpts, box: Box, i: num
   }
 }
 
-export function drawStrip(c: CanvasRenderingContext2D, s: number, o: ExportOpts) {
+/* Render the strip (or, with `slice`, a horizontal window of it — used to
+   export one slide at a time so 2x exports never allocate a 40k-px canvas). */
+export function drawStrip(
+  c: CanvasRenderingContext2D, s: number, o: ExportOpts,
+  slice?: { x: number; w: number },
+) {
   const T = o.tpl;
   const p = o.palette;
   const stripW = T.n * SLIDE_W;
-  c.canvas.width = Math.round(stripW * s);
+  c.canvas.width = Math.round((slice ? slice.w : stripW) * s);
   c.canvas.height = Math.round(T.H * s);
+  c.save();
+  if (slice) c.translate(-slice.x * s, 0);
 
   // background
   if (o.bgStyle === "gradient") {
@@ -250,7 +258,8 @@ export function drawStrip(c: CanvasRenderingContext2D, s: number, o: ExportOpts)
   }
 
   // filmstrip bands
-  const bandColor = p.name === "Charcoal" ? "#000000" : "#1B1B1B";
+  const darkBg = luminance(p.bg) < 0.5;
+  const bandColor = darkBg ? "#000000" : "#1B1B1B";
   for (const band of T.bands) {
     c.fillStyle = bandColor;
     c.fillRect(band.x * s, band.y * s, band.w * s, band.h * s);
@@ -293,12 +302,14 @@ export function drawStrip(c: CanvasRenderingContext2D, s: number, o: ExportOpts)
     c.restore();
   }
 
+  c.restore(); // undo slice translate before the canvas-aligned texture pass
+
   // texture overlay
   if (o.texture === "grain" || o.texture === "paper") {
     c.save();
     c.globalAlpha = o.texture === "grain"
-      ? (p.name === "Charcoal" ? 0.08 : 0.05)
-      : (p.name === "Charcoal" ? 0.12 : 0.09);
+      ? (darkBg ? 0.08 : 0.05)
+      : (darkBg ? 0.12 : 0.09);
     c.globalCompositeOperation = "overlay";
     c.fillStyle = c.createPattern(
       o.texture === "grain" ? getNoiseTile() : getPaperTile(), "repeat")!;
@@ -323,32 +334,78 @@ async function ensureFonts(texts: TextBlock[]) {
   try { await fd.ready; } catch { /* ignore */ }
 }
 
-/* render the full strip, slice into per-post PNGs, trigger real downloads */
-export async function exportSlides(opts: Omit<ExportOpts, "images">) {
+/* ---------- downloads ---------- */
+
+export interface ExportSettings {
+  format: "png" | "jpeg";
+  scale: 1 | 2;
+  mode: "slides" | "pano";
+  docName: string;
+  separate?: boolean; // fallback: one download per slide instead of a zip
+}
+
+// browsers start failing around 16k–32k px per canvas dimension; stay safe
+const MAX_CANVAS_DIM = 16000;
+
+function triggerDownload(blob: Blob, filename: string) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+const toBlob = (canvas: HTMLCanvasElement, format: "png" | "jpeg"): Promise<Blob | null> =>
+  new Promise(res => canvas.toBlob(res, `image/${format}`, format === "jpeg" ? 0.9 : undefined));
+
+const safeName = (name: string) =>
+  (name || "carousel").trim().replace(/[^\w\- ]+/g, "").replace(/\s+/g, "_").slice(0, 60) || "carousel";
+
+/* Render + download per the settings: a zip of per-slide images (default),
+   loose per-slide files (`separate`), or one full-strip panorama image. */
+export async function exportCarousel(
+  opts: Omit<ExportOpts, "images">, settings: ExportSettings,
+) {
   const images = await loadImages(opts.photos);
   const o: ExportOpts = { ...opts, images };
   const T = o.tpl;
+  const ext = settings.format === "jpeg" ? "jpg" : "png";
+  const name = safeName(settings.docName);
 
   // make sure web fonts used by text blocks are rasterizable before drawing
   await ensureFonts(o.texts);
 
-  const full = document.createElement("canvas");
-  drawStrip(full.getContext("2d")!, 1, o);
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d")!;
 
+  if (settings.mode === "pano") {
+    // one wide image; clamp scale so the canvas stays within safe limits
+    let s: number = settings.scale;
+    while (s > 1 && T.n * SLIDE_W * s > MAX_CANVAS_DIM) s -= 1;
+    drawStrip(ctx, s, o);
+    const blob = await toBlob(canvas, settings.format);
+    if (blob) triggerDownload(blob, `${name}_strip.${ext}`);
+    return;
+  }
+
+  // slides: render one at a time (2x of a 10-slide strip would exceed canvas
+  // limits if drawn whole), then zip — or fall back to loose downloads
+  const files: Record<string, Uint8Array> = {};
   for (let i = 0; i < T.n; i++) {
-    const slice = document.createElement("canvas");
-    slice.width = SLIDE_W;
-    slice.height = T.H;
-    slice.getContext("2d")!.drawImage(
-      full, i * SLIDE_W, 0, SLIDE_W, T.H, 0, 0, SLIDE_W, T.H);
-
-    const blob: Blob | null = await new Promise(res => slice.toBlob(res, "image/png"));
+    drawStrip(ctx, settings.scale, o, { x: i * SLIDE_W, w: SLIDE_W });
+    const blob = await toBlob(canvas, settings.format);
     if (!blob) continue;
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `slide_${String(i + 1).padStart(2, "0")}.png`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    await new Promise(r => setTimeout(r, 350));
+    const fname = `${String(i + 1).padStart(2, "0")}.${ext}`;
+    if (settings.separate) {
+      triggerDownload(blob, `${name}_${fname}`);
+      await new Promise(r => setTimeout(r, 350));
+    } else {
+      files[fname] = new Uint8Array(await blob.arrayBuffer());
+    }
+  }
+  if (!settings.separate) {
+    // level 0: PNG/JPEG payloads are already compressed
+    const zipped = zipSync(files, { level: 0 });
+    triggerDownload(new Blob([zipped], { type: "application/zip" }), `${name}.zip`);
   }
 }

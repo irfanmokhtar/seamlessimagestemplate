@@ -82,7 +82,7 @@ export function IconBtn({ icon, onClick, title, disabled, active, danger }: any)
 }
 
 /* ---------- popover ---------- */
-export function Popover({ open, onClose, children, className }: any) {
+export function Popover({ open, onClose, children, className, style }: any) {
   React.useEffect(() => {
     if (!open) return undefined;
     const h = (e: any) => {
@@ -92,7 +92,7 @@ export function Popover({ open, onClose, children, className }: any) {
     return () => document.removeEventListener("pointerdown", h);
   }, [open]);
   if (!open) return null;
-  return <div className={"popover " + (className || "")}>{children}</div>;
+  return <div className={"popover " + (className || "")} style={style}>{children}</div>;
 }
 
 /* ---------- palette swatches (inspector) ---------- */

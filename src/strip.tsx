@@ -57,14 +57,26 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   const onPointerDown = (e: React.PointerEvent) => {
     if (!api.interactive || e.button !== 0) return;
     if (e.altKey) return; // handled in click
-    if (!src) return;
-    if (api.rotateMode) {
+    if (e.shiftKey && src) {
+      // swap gesture — resolved on pointer-up over the target slot
+      drag.current = { swap: true, moved: false, x: e.clientX, y: e.clientY };
+    } else if (e.metaKey || e.ctrlKey || !src) {
+      // move the box itself (empty slots always move; ⌘ forces it on filled)
+      drag.current = { boxEdit: true, move: true, x: e.clientX, y: e.clientY, moved: false };
+      api.onSelect?.(index);
+    } else if (api.rotateMode) {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
       drag.current = { rot: true, cx, cy, ang: Math.atan2(e.clientY - cy, e.clientX - cx), moved: false };
     } else {
       drag.current = { x: e.clientX, y: e.clientY, moved: false };
     }
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const startResize = (corner: string) => (e: React.PointerEvent) => {
+    if (!api.interactive || e.button !== 0) return;
+    e.stopPropagation();
+    drag.current = { boxEdit: true, resize: corner, x: e.clientX, y: e.clientY, moved: false };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent) => {
@@ -80,6 +92,18 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
     }
     let dx = (e.clientX - drag.current.x) / s;
     let dy = (e.clientY - drag.current.y) / s;
+    if (drag.current.swap) {
+      if (Math.abs(dx) + Math.abs(dy) > 0) drag.current.moved = true;
+      return;
+    }
+    if (drag.current.boxEdit) {
+      if (Math.abs(dx) + Math.abs(dy) > 0) drag.current.moved = true;
+      drag.current.x = e.clientX;
+      drag.current.y = e.clientY;
+      if (drag.current.resize) api.onBoxResize?.(index, drag.current.resize, dx, dy);
+      else api.onBoxMove?.(index, dx, dy);
+      return;
+    }
     if (box.rot) {
       const co = Math.cos(-box.rot), si = Math.sin(-box.rot);
       [dx, dy] = [dx * co - dy * si, dx * si + dy * co];
@@ -89,7 +113,20 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
     drag.current.y = e.clientY;
     api.onPan?.(index, dx, dy, box);
   };
-  const onPointerUp = () => { setTimeout(() => { drag.current = null; }, 0); };
+  const onPointerUp = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d && d.moved) {
+      if (d.swap) {
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const target = el?.closest?.(".photoBox[data-idx]") as HTMLElement | null;
+        const j = target ? Number(target.dataset.idx) : NaN;
+        if (Number.isInteger(j) && j !== index) api.onSwap?.(index, j);
+      } else if (d.boxEdit) {
+        api.onBoxEditEnd?.(index);
+      }
+    }
+    setTimeout(() => { drag.current = null; }, 0);
+  };
 
   const onClick = (e: React.MouseEvent) => {
     if (!api.interactive) return;
@@ -140,7 +177,8 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   }
 
   return (
-    <div ref={ref} className={"photoBox" + (over ? " dropOver" : "") + (selected ? " selected" : "")} style={style}
+    <div ref={ref} data-idx={index}
+      className={"photoBox" + (over ? " dropOver" : "") + (selected ? " selected" : "")} style={style}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
       onPointerUp={onPointerUp} onClick={onClick} onDoubleClick={onDoubleClick}
       onDragOver={onDragOver} onDragLeave={() => setOver(false)} onDrop={onDrop}>
@@ -174,8 +212,10 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
       {over && <div className="dropRing"></div>}
       {selected && api.interactive && (
         <div className="selRing">
-          <i className="selH tl"></i><i className="selH tr"></i>
-          <i className="selH bl"></i><i className="selH br"></i>
+          {(["tl", "tr", "bl", "br"] as const).map(c => (
+            <i key={c} className={"selH " + c}
+              onPointerDown={startResize(c)} onPointerMove={onPointerMove} onPointerUp={onPointerUp}></i>
+          ))}
         </div>
       )}
     </div>
@@ -188,10 +228,30 @@ function TextItem({ t, s, vs, palette, api }: {
   t: TextBlock; s: number; vs: number; palette: Palette; api: StripApi;
 }) {
   const drag = React.useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const [editing, setEditing] = React.useState(false);
+  const editRef = React.useRef<HTMLDivElement>(null);
   const selected = !!api.interactive && api.selText === t.id;
 
+  React.useEffect(() => {
+    if (!editing) return;
+    const el = editRef.current;
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }, [editing]);
+
+  const commit = () => {
+    const el = editRef.current;
+    if (el) api.onTextEdit?.(t.id, el.innerText.replace(/\n$/, ""));
+    setEditing(false);
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!api.interactive || e.button !== 0) return;
+    if (!api.interactive || e.button !== 0 || editing) { if (editing) e.stopPropagation(); return; }
     e.stopPropagation();
     drag.current = { x: e.clientX, y: e.clientY, moved: false };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -212,6 +272,12 @@ function TextItem({ t, s, vs, palette, api }: {
     if (drag.current && drag.current.moved) return;
     api.onTextSelect?.(t.id);
   };
+  const onDoubleClick = (e: React.MouseEvent) => {
+    if (!api.interactive || editing) return;
+    e.stopPropagation();
+    api.onTextSelect?.(t.id);
+    setEditing(true);
+  };
 
   const anchorX = t.align === "center" ? "-50%" : t.align === "right" ? "-100%" : "0";
   const style: React.CSSProperties = {
@@ -224,21 +290,32 @@ function TextItem({ t, s, vs, palette, api }: {
     fontSize: t.size * vs * s,
     letterSpacing: t.letterSpacing * vs * s,
     textAlign: t.align,
+    // while editing, show the raw text — innerText would otherwise return the
+    // CSS-uppercased string on commit and destroy the original casing
+    textTransform: t.upper && !editing ? "uppercase" : "none",
     color: t.color === "auto" ? palette.text : t.color,
     whiteSpace: "pre",
     lineHeight: 1.1,
     zIndex: 20,
     textShadow: "0 2px 14px rgba(0,0,0,0.22)",
-    cursor: api.interactive ? "move" : "default",
+    cursor: editing ? "text" : api.interactive ? "move" : "default",
     pointerEvents: api.interactive ? "auto" : "none",
-    userSelect: "none",
+    userSelect: editing ? "text" : "none",
   };
 
   return (
-    <div className={"textBlock" + (selected ? " selected" : "")} style={style}
+    <div ref={editRef}
+      className={"textBlock" + (selected ? " selected" : "") + (editing ? " editing" : "")}
+      style={style}
+      contentEditable={editing} suppressContentEditableWarning
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp} onClick={onClick}>
-      {t.upper ? t.text.toUpperCase() : t.text}
+      onPointerUp={onPointerUp} onClick={onClick} onDoubleClick={onDoubleClick}
+      onBlur={editing ? commit : undefined}
+      onKeyDown={editing ? (e) => {
+        e.stopPropagation();
+        if (e.key === "Escape") { e.preventDefault(); commit(); }
+      } : undefined}>
+      {t.text}
     </div>
   );
 }
@@ -256,7 +333,8 @@ export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, se
   if (bgStyle === "gradient") {
     bg = `linear-gradient(135deg, ${shade(p.bg, 0.04)}, ${shade(p.bg, -0.06)})`;
   }
-  const bandColor = p.name === "Charcoal" ? "#000000" : "#1B1B1B";
+  const darkBg = luminance(p.bg) < 0.5;
+  const bandColor = darkBg ? "#000000" : "#1B1B1B";
 
   return (
     <div className="stripContent" style={{ width: stripW, height: H, background: bg }}>
@@ -333,8 +411,8 @@ export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, se
         <div className="textureOverlay" style={{
           backgroundImage: texture === "grain" ? GRAIN_URI : PAPER_URI,
           opacity: texture === "grain"
-            ? (p.name === "Charcoal" ? 0.10 : 0.06)
-            : (p.name === "Charcoal" ? 0.14 : 0.10),
+            ? (darkBg ? 0.10 : 0.06)
+            : (darkBg ? 0.14 : 0.10),
         }}></div>
       )}
     </div>

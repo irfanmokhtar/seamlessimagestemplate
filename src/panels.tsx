@@ -2,20 +2,20 @@
    right contextual inspector, bottom slide strip. */
 
 import React from "react";
-import { PATTERNS, DECOR_KEYS, RATIOS, SLIDE_W, PALETTES, FONTS, fontStack } from "./core";
-import { Ic, Seg, Stepper, IconBtn, PaletteSwatches, PatternTile } from "./icons";
+import { PATTERNS, PATTERN_INFO, DECOR_KEYS, RATIOS, SLIDE_W, PALETTES, FONTS, fontStack } from "./core";
+import { Ic, Seg, Stepper, IconBtn, PaletteSwatches, PatternTile, PatternDiagram, Popover } from "./icons";
 import { StripContent } from "./strip";
 
 /* ============ TOP BAR ============ */
 export function TopBar({ docName, onDocName, theme, onTheme, onUndo, onRedo, canUndo, canRedo,
-  zoom, onZoomStep, onFit, viewMode, onViewMode, onExport, onShuffle, spinning }: any) {
+  zoom, onZoomStep, onFit, viewMode, onViewMode, onExport, onShuffle, spinning, onHome }: any) {
   const pct = Math.round(zoom * 100);
   return (
     <header className="topBar">
       <div className="tbLeft">
-        <span className="brandMark" title="Seamless">
+        <button type="button" className="brandMark asBtn" title="All projects" onClick={onHome}>
           <i></i><i></i><i></i>
-        </span>
+        </button>
         <span className="tbDivider"></span>
         <input className="docName" value={docName} spellCheck={false}
           onChange={(e) => onDocName(e.target.value)} aria-label="Document name" />
@@ -127,10 +127,11 @@ function LayoutsSection({ enabled, onToggle, offCount, onShuffle, spinning }: an
   );
 }
 
-function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected }: any) {
+function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwapSlots, onAddSlot }: any) {
   const slots = tpl.boxes.map((_b: any, i: number) => i);
   const filled = slots.filter((i: number) => photos[i]);
   const empty = slots.length - filled.length;
+  const [dragOver, setDragOver] = React.useState<number | null>(null);
   return (
     <>
       <div className="panelHd">
@@ -144,8 +145,20 @@ function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected }: any
         <div className="photoTray">
           {slots.map((i: number) => (
             <button key={i} type="button"
-              className={"trayItem" + (selected === i ? " on" : "") + (photos[i] ? "" : " empty")}
-              onClick={() => onSelectSlot(i)} title={"Slot " + (i + 1)}>
+              className={"trayItem" + (selected === i ? " on" : "") + (photos[i] ? "" : " empty")
+                + (dragOver === i ? " dragOver" : "")}
+              onClick={() => onSelectSlot(i)} title={"Slot " + (i + 1) + " — drag onto another slot to swap"}
+              draggable={!!photos[i]}
+              onDragStart={(e) => { e.dataTransfer.setData("seamless/slot", String(i)); e.dataTransfer.effectAllowed = "move"; }}
+              onDragOver={(e) => {
+                if ([...e.dataTransfer.types].includes("seamless/slot")) { e.preventDefault(); setDragOver(i); }
+              }}
+              onDragLeave={() => setDragOver(d => (d === i ? null : d))}
+              onDrop={(e) => {
+                e.preventDefault(); setDragOver(null);
+                const from = Number(e.dataTransfer.getData("seamless/slot"));
+                if (Number.isInteger(from) && from !== i) onSwapSlots(from, i);
+              }}>
               {photos[i]
                 ? <img src={photos[i]} alt="" draggable={false} />
                 : <span className="trayNum">{i + 1}</span>}
@@ -153,26 +166,44 @@ function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected }: any
             </button>
           ))}
         </div>
+        <button type="button" className="miniBtn" onClick={onAddSlot}>
+          {Ic.plus}<span>Add photo slot</span>
+        </button>
       </div>
-      <p className="panelFoot">Drop images straight onto the canvas to fill empty slots in order.</p>
+      <p className="panelFoot">Drop images onto the canvas to fill empty slots. Drag tray photos onto each other to swap.</p>
     </>
   );
 }
 
 const TEXT_COLORS = ["auto", "#FFFFFF", "#111111", "#C9A24B", "#E4572E", "#3A6B6B"];
 
-function TextSection({ texts = [], selText, onAddText, onUpdateText, onRemoveText, onSelectText }: any) {
+/* one-tap text styles — partials fed straight into newTextBlock */
+const TEXT_PRESETS: { label: string; partial: any }[] = [
+  { label: "Heading",   partial: { text: "Heading", font: "playfair", size: 140, weight: 600, upper: true, letterSpacing: 2 } },
+  { label: "Subtitle",  partial: { text: "Subtitle", font: "montserrat", size: 56, weight: 500, upper: true, letterSpacing: 10 } },
+  { label: "Caption",   partial: { text: "A short caption", font: "inter", size: 40, weight: 400, upper: false, letterSpacing: 0 } },
+  { label: "Signature", partial: { text: "yours truly", font: "dancing", size: 110, weight: 400, upper: false, letterSpacing: 0 } },
+];
+
+function TextSection({ texts = [], selText, onAddText, onUpdateText, onRemoveText, onSelectText, onDuplicateText }: any) {
   const sel = texts.find((t: any) => t.id === selText) || null;
   return (
     <>
       <div className="panelHd">
         <h2>Text</h2>
-        <p>Add titles, captions & signatures — drag them anywhere on the canvas.</p>
+        <p>Add titles, captions & signatures — drag them anywhere, double-click to edit in place.</p>
       </div>
-      <button type="button" className="bigAction" onClick={onAddText}>
+      <button type="button" className="bigAction" onClick={() => onAddText()}>
         {Ic.text}<span>Add text block</span>
       </button>
       <div className="panelScroll">
+        <div className="presetRow">
+          {TEXT_PRESETS.map(p => (
+            <button key={p.label} type="button" className="presetBtn"
+              style={{ fontFamily: fontStack(p.partial.font) }}
+              onClick={() => onAddText(p.partial)}>{p.label}</button>
+          ))}
+        </div>
         {texts.length > 0 && (
           <div className="textList">
             {texts.map((t: any) => (
@@ -186,7 +217,8 @@ function TextSection({ texts = [], selText, onAddText, onUpdateText, onRemoveTex
         )}
 
         {sel ? (
-          <TextEditor key={sel.id} t={sel} onUpdate={onUpdateText} onRemove={onRemoveText} />
+          <TextEditor key={sel.id} t={sel} onUpdate={onUpdateText} onRemove={onRemoveText}
+            onDuplicate={onDuplicateText} />
         ) : (
           <p className="inspHint" style={{ padding: "8px 4px 0" }}>
             {texts.length ? "Select a block above to edit it." : "No text yet — add a block to get started."}
@@ -197,7 +229,7 @@ function TextSection({ texts = [], selText, onAddText, onUpdateText, onRemoveTex
   );
 }
 
-function TextEditor({ t, onUpdate, onRemove }: any) {
+function TextEditor({ t, onUpdate, onRemove, onDuplicate }: any) {
   const set = (patch: any) => onUpdate(t.id, patch);
   const cats = ["Serif", "Sans", "Script"] as const;
   return (
@@ -266,9 +298,14 @@ function TextEditor({ t, onUpdate, onRemove }: any) {
         <Toggle label="UPPERCASE" on={t.upper} onChange={(v: boolean) => set({ upper: v })} />
       </div>
 
-      <button type="button" className="lineBtn danger" onClick={() => onRemove(t.id)}>
-        {Ic.trash}<span>Delete block</span>
-      </button>
+      <div className="btnRow">
+        <button type="button" className="lineBtn" onClick={() => onDuplicate(t.id)}>
+          {Ic.swap}<span>Duplicate</span>
+        </button>
+        <button type="button" className="lineBtn danger" onClick={() => onRemove(t.id)}>
+          {Ic.trash}<span>Delete</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -361,7 +398,7 @@ export function LeftPanel(props: any) {
 
 export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bgStyle, texture,
   onPalette, onN, onH, onBgStyle, onTexture, onReplace, onRemove, onZoomTo, onNudge,
-  onFitPhoto, onStraighten }: any) {
+  onFitPhoto, onStraighten, onShare, onDeleteSlot }: any) {
 
   if (selected != null) {
     const src = photos[selected];
@@ -412,9 +449,15 @@ export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bg
             <p className="inspHint">Or pick the Crop tool and drag the photo to rotate.</p>
           </InspGroup>
 
+          <InspGroup label="Slot">
+            <p className="inspHint">⌘-drag moves the slot · drag a corner handle to resize ·
+              ⇧-drag onto another slot to swap photos.</p>
+            <button type="button" className="lineBtn danger"
+              onClick={() => onDeleteSlot(selected)}>{Ic.trash}<span>Delete slot</span></button>
+          </InspGroup>
+
           <InspGroup label="Coming soon">
             <div className="soonRow">{Ic.adjust}<span>Brightness & filters</span>{Ic.lock}</div>
-            <div className="soonRow">{Ic.fitFill}<span>Free resize slot</span>{Ic.lock}</div>
           </InspGroup>
         </div>
       </aside>
@@ -452,6 +495,13 @@ export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bg
             { value: "paper", label: "Paper" },
           ]} />
         </InspGroup>
+        <InspGroup label={"Look" + (tpl.seed != null ? ` · #${tpl.seed.toString(16).toUpperCase()}` : "")}>
+          <button type="button" className="lineBtn" onClick={onShare}>
+            {Ic.link}<span>Copy share link</span>
+          </button>
+          <p className="inspHint">Anyone opening the link gets this exact layout, colors,
+            background & text — with empty photo slots.</p>
+        </InspGroup>
         <p className="inspHint pad">Select a photo on the canvas to edit it individually.</p>
       </div>
     </aside>
@@ -485,8 +535,68 @@ export function InspGroup({ label, children }: any) {
 
 /* ============ BOTTOM SLIDE STRIP ============ */
 
+function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H, active,
+  locked, onSelectPost, onToggleLock, onPickLayout }: any) {
+  // popover position is fixed — the bottom strip scrolls horizontally, so an
+  // absolutely-positioned popover would be clipped by the scroll container
+  const [pickAt, setPickAt] = React.useState<{ x: number; y: number } | null>(null);
+  const pickOpen = pickAt !== null;
+  const setPickOpen = (o: boolean) => setPickAt(o ? pickAt : null);
+  const singles = Object.keys(PATTERNS).filter(t => PATTERNS[t].span === 1);
+  return (
+    <span className={"ssThumbWrap" + (locked ? " locked" : "")}>
+      <button type="button"
+        className={"ssThumb" + (active ? " on" : "")}
+        onClick={() => onSelectPost(i)} title={"Post " + (i + 1)}>
+        <span className="ssClip" style={{ width: slideW, height: H }}>
+          <span className="ssInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
+            <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
+              texture={texture} texts={texts} s={s} api={{ ...api, interactive: false }} />
+          </span>
+        </span>
+        <em className="ssNum">{i + 1}</em>
+      </button>
+      <span className="ssTools">
+        <button type="button" className={"ssTool" + (locked ? " on" : "")}
+          title={locked ? "Unlock — shuffle may change this post" : "Lock — shuffle keeps this post"}
+          onClick={(e) => { e.stopPropagation(); onToggleLock(i); }}>
+          {Ic.lock}
+        </button>
+        <button type="button" className={"ssTool popTrigger" + (pickOpen ? " on" : "")}
+          title="Choose this post's layout"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (pickOpen) { setPickAt(null); return; }
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setPickAt({ x: r.left + r.width / 2, y: r.top - 8 });
+          }}>
+          {Ic.layouts}
+        </button>
+      </span>
+      <Popover open={pickOpen} onClose={() => setPickOpen(false)} className="layoutPop"
+        style={pickAt ? {
+          position: "fixed", left: pickAt.x, top: pickAt.y,
+          bottom: "auto", transform: "translate(-50%, -100%)",
+        } : undefined}>
+        <span className="layoutPopHd">Post {i + 1} layout</span>
+        <div className="layoutPopGrid">
+          {singles.map(t => (
+            <button key={t} type="button"
+              className={"layoutPick" + (tpl.layoutAt[i] === t ? " on" : "")}
+              title={PATTERN_INFO[t].desc}
+              onClick={() => { setPickOpen(false); onPickLayout(i, t); }}>
+              <PatternDiagram type={t} />
+              <span>{PATTERN_INFO[t].label}</span>
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </span>
+  );
+}
+
 export function BottomStrip({ tpl, palette, bgStyle, texture, texts, api, activePost, onSelectPost,
-  onAddPost, n }: any) {
+  onAddPost, n, locks = [], onToggleLock, onPickLayout }: any) {
   const H = 60;
   const s = H / tpl.H;
   const slideW = SLIDE_W * s;
@@ -497,17 +607,10 @@ export function BottomStrip({ tpl, palette, bgStyle, texture, texts, api, active
         {Array.from({ length: tpl.n }, (_, i) => (
           <React.Fragment key={i}>
             {i > 0 && <span className="ssLink" title="Seamless boundary">{Ic.link}</span>}
-            <button type="button"
-              className={"ssThumb" + (activePost === i ? " on" : "")}
-              onClick={() => onSelectPost(i)} title={"Post " + (i + 1)}>
-              <span className="ssClip" style={{ width: slideW, height: H }}>
-                <span className="ssInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
-                  <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                    texture={texture} texts={texts} s={s} api={{ ...api, interactive: false }} />
-                </span>
-              </span>
-              <em className="ssNum">{i + 1}</em>
-            </button>
+            <PostThumb tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
+              texts={texts} api={api} i={i} s={s} slideW={slideW} H={H}
+              active={activePost === i} locked={!!locks[i]}
+              onSelectPost={onSelectPost} onToggleLock={onToggleLock} onPickLayout={onPickLayout} />
           </React.Fragment>
         ))}
         {n < 10 && (
