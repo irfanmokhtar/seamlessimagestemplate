@@ -10,6 +10,7 @@ export interface Box {
   rot: number;
   frame: "polaroid" | null;
   blurBg: boolean;
+  manual?: boolean; // user-placed/edited — generator must not touch it
 }
 
 export interface Band {
@@ -30,6 +31,7 @@ export interface Template {
   layoutAt: string[];
   n: number;
   H: number;
+  seed?: number; // PRNG seed that generated this template (reproducible looks)
 }
 
 export interface Palette {
@@ -85,9 +87,17 @@ export interface StripApi {
   onPan?: (i: number, dx: number, dy: number, box: Box) => void;
   onZoom?: (i: number, f: number) => void;
   onRotate?: (i: number, dDeg: number, box: Box) => void;
+  // direct slot manipulation (⌘-drag = move box, corner handles = resize,
+  // gestures end with onBoxEditEnd which commits one undo step)
+  onBoxMove?: (i: number, dx: number, dy: number) => void;
+  onBoxResize?: (i: number, corner: "tl" | "tr" | "bl" | "br", dx: number, dy: number) => void;
+  onBoxEditEnd?: (i: number) => void;
+  // ⇧-drag a filled slot onto another slot to swap photos
+  onSwap?: (i: number, j: number) => void;
   // text blocks
   texts?: TextBlock[];
   selText?: number | null;
   onTextSelect?: (id: number) => void;
   onTextMove?: (id: number, dx: number, dy: number) => void;
+  onTextEdit?: (id: number, text: string) => void;
 }

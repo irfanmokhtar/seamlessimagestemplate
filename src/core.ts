@@ -158,7 +158,28 @@ export const RATIOS = [
 
 /* ---------- helpers ---------- */
 
-export const rand = (a: number, b: number) => a + Math.random() * (b - a);
+/* Seeded PRNG (mulberry32). Generation runs against `R` so a template can be
+   reproduced from its seed; outside generateTemplate, R is plain Math.random
+   (export.ts texture tiles etc. stay non-deterministic, which is fine). */
+export type RNG = () => number;
+export function mulberry32(seed: number): RNG {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export const newSeed = () => Math.floor(Math.random() * 0xFFFFFFFF) >>> 0;
+
+let R: RNG = Math.random;
+function seeded<T>(seed: number, fn: () => T): T {
+  R = mulberry32(seed);
+  try { return fn(); } finally { R = Math.random; }
+}
+
+export const rand = (a: number, b: number) => a + R() * (b - a);
 export const randInt = (a: number, b: number) => Math.floor(rand(a, b + 1));
 
 /* Minimum uniform up-scale so a w×h image still fully covers a w×h box once
@@ -189,7 +210,7 @@ export function shade(hex: string, amt: number) {
 
 function weightedPick(types: string[]) {
   const total = types.reduce((s, t) => s + PATTERNS[t].weight, 0);
-  let r = Math.random() * total;
+  let r = rand(0, 1) * total;
   for (const t of types) {
     r -= PATTERNS[t].weight;
     if (r <= 0) return t;
@@ -212,20 +233,20 @@ function genSequence(n: number, enabled: Enabled, start = 0, prevInit: string | 
   while (i < n) {
     const rem = n - i;
     const multiPool = multis.filter(t => t !== prev && PATTERNS[t].span <= rem);
-    if (multiPool.length && Math.random() < 0.3 && i !== 0) {
+    if (multiPool.length && rand(0, 1) < 0.3 && i !== 0) {
       const t = weightedPick(multiPool);
       let span = PATTERNS[t].span;
-      if (t === "panorama" && rem >= 3 && Math.random() < 0.4) span = 3;
+      if (t === "panorama" && rem >= 3 && rand(0, 1) < 0.4) span = 3;
       seq.push({ type: t, span, slide: i });
       prev = t; i += span;
       continue;
     }
     let pool = singles.filter(t => t !== prev);
     if (!pool.length) pool = singles;
-    if (i === 0 && Math.random() < 0.55) {
+    if (i === 0 && rand(0, 1) < 0.55) {
       const openers = pool.filter(t => ["full", "hero"].includes(t));
       if (openers.length) pool = openers;
-    } else if (i === n - 1 && Math.random() < 0.5) {
+    } else if (i === n - 1 && rand(0, 1) < 0.5) {
       const closers = pool.filter(t => ["framed", "hero"].includes(t));
       if (closers.length) pool = closers;
     }
@@ -268,7 +289,7 @@ function emitLayout(
       const mt = Math.round(randInt(100, 170) * vs);
       const mb = Math.round(randInt(100, 170) * vs);
       boxes.push(makeBox(i, sx + mx, mt, SLIDE_W - 2 * mx, H - mt - mb,
-        { blurBg: Math.random() < 0.5 }));
+        { blurBg: rand(0, 1) < 0.5 }));
 
     } else if (t === "stack2") {
       const mx = randInt(70, 110);
@@ -300,7 +321,7 @@ function emitLayout(
       }
 
     } else if (t === "editorial") {
-      const left = Math.random() < 0.5;
+      const left = rand(0, 1) < 0.5;
       const m = randInt(60, 90);
       const mt = Math.round(randInt(80, 140) * vs);
       const mb = Math.round(randInt(80, 140) * vs);
@@ -314,13 +335,13 @@ function emitLayout(
       boxes.push(makeBox(i, smallX, smallY, smallW, smallH));
 
     } else if (t === "hero") {
-      if (H >= 900 && Math.random() < 0.4) {
+      if (H >= 900 && rand(0, 1) < 0.4) {
         const ph = Math.round(H * rand(0.58, 0.68));
-        const top = Math.random() < 0.5;
+        const top = rand(0, 1) < 0.5;
         boxes.push(makeBox(i, sx, top ? 0 : H - ph, SLIDE_W, ph));
       } else {
         const pw = Math.round(SLIDE_W * rand(0.56, 0.66));
-        const left = Math.random() < 0.5;
+        const left = rand(0, 1) < 0.5;
         boxes.push(makeBox(i, left ? sx : sx + SLIDE_W - pw, 0, pw, H));
       }
 
@@ -335,7 +356,7 @@ function emitLayout(
       const stepX = (SLIDE_W - pw - (px - sx) - 30) / Math.max(1, count - 1);
       const stepY = Math.max(0, usableH - py) / Math.max(1, count - 1);
       for (let k = 0; k < count; k++) {
-        const rot = (Math.random() < 0.5 ? -1 : 1) * rand(0.04, 0.12);
+        const rot = (rand(0, 1) < 0.5 ? -1 : 1) * rand(0.04, 0.12);
         boxes.push(makeBox(i, px, py + frameB, pw, ph, { rot, frame: "polaroid" }));
         px += stepX * rand(0.8, 1.1);
         py += stepY * rand(0.7, 1.1);
@@ -344,7 +365,7 @@ function emitLayout(
     } else if (t === "spread") {
       const ms = randInt(130, 200);
       const mv = Math.round(randInt(140, 220) * vs);
-      const drift = Math.random() < 0.5 ? 0 : Math.round(SLIDE_W * rand(-0.22, 0.22));
+      const drift = rand(0, 1) < 0.5 ? 0 : Math.round(SLIDE_W * rand(-0.22, 0.22));
       const w = 2 * SLIDE_W - 2 * ms;
       let x = sx + ms + drift;
       x = Math.max(sx + 60, Math.min(sx + 2 * SLIDE_W - 60 - w, x));
@@ -382,14 +403,15 @@ function emitLayout(
     }
 }
 
-/* widen full-bleed boxes that neighbor a margined layout, slides [start, n) */
+/* widen full-bleed boxes that neighbor a margined layout, slides [start, n).
+   `skip[i]` (locked or manual-owned slides) exempts slide i's box from widening. */
 function applyOverhangs(
-  boxes: Box[], layoutAt: string[], n: number, start = 0,
+  boxes: Box[], layoutAt: string[], n: number, start = 0, skip?: boolean[],
 ) {
   const margined = ["framed", "stack2", "grid4", "editorial"];
   for (let i = start; i < n; i++) {
-    if (layoutAt[i] !== "full") continue;
-    const box = boxes.find(b => b.slide === i && b.x + b.w === (i + 1) * SLIDE_W);
+    if (layoutAt[i] !== "full" || (skip && skip[i])) continue;
+    const box = boxes.find(b => !b.manual && b.slide === i && b.x + b.w === (i + 1) * SLIDE_W);
     if (!box) continue;
     if (i + 1 < n && margined.includes(layoutAt[i + 1])) {
       box.w += randInt(50, 130);
@@ -401,24 +423,10 @@ function applyOverhangs(
   }
 }
 
-export function generateTemplate(n: number, H: number, enabled: Enabled): Template {
-  coreBoxId = 0;
+function makeDecor(n: number, H: number, enabled: Enabled): Template["decor"] {
   const vs = H / 1350;
-  const boxes: Box[] = [];
-  const bands: Template["bands"] = [];
-  const layoutAt: string[] = new Array(n);
-  const seq = genSequence(n, enabled);
-
-  for (const { type: t, span, slide: i } of seq) {
-    for (let k = 0; k < span; k++) layoutAt[i + k] = t;
-    emitLayout(t, span, i, H, boxes, bands);
-  }
-
-  if (enabled.overhang) applyOverhangs(boxes, layoutAt, n);
-
-  // decor
   const decor: Template["decor"] = [];
-  if (enabled.ribbon && Math.random() < 0.55) {
+  if (enabled.ribbon && rand(0, 1) < 0.55) {
     decor.push({ kind: "ribbon", y: Math.round(H * rand(0.12, 0.85)), h: randInt(8, 22) });
   }
   if (enabled.arcs) {
@@ -429,12 +437,179 @@ export function generateTemplate(n: number, H: number, enabled: Enabled): Templa
         cx: randInt(1, n - 1) * SLIDE_W + randInt(-200, 200),
         cy: Math.round(H * rand(0.15, 0.85)),
         r: randInt(Math.round(180 * vs) + 60, Math.round(380 * vs) + 80),
-        stroke: Math.random() < 0.5,
+        stroke: rand(0, 1) < 0.5,
       });
     }
   }
+  return decor;
+}
 
-  return { boxes, bands, decor, layoutAt, n, H };
+export function generateTemplate(n: number, H: number, enabled: Enabled, seed?: number): Template {
+  const sd = (seed ?? newSeed()) >>> 0;
+  return seeded(sd, () => {
+    coreBoxId = 0;
+    const boxes: Box[] = [];
+    const bands: Template["bands"] = [];
+    const layoutAt: string[] = new Array(n);
+    const seq = genSequence(n, enabled);
+
+    for (const { type: t, span, slide: i } of seq) {
+      for (let k = 0; k < span; k++) layoutAt[i + k] = t;
+      emitLayout(t, span, i, H, boxes, bands);
+    }
+
+    if (enabled.overhang) applyOverhangs(boxes, layoutAt, n);
+
+    return { boxes, bands, decor: makeDecor(n, H, enabled), layoutAt, n, H, seed: sd };
+  });
+}
+
+/* ---------- locked shuffle ----------
+   Re-roll only unlocked slides; locked slides keep their boxes/bands verbatim.
+   Returns the new template plus a box-index map: map[newIdx] = oldIdx for kept
+   boxes, -1 for fresh ones — the app uses it to keep photos on locked slides. */
+export function shuffleTemplate(
+  prev: Template, enabled: Enabled, locks: boolean[], seed?: number,
+): { tpl: Template; map: number[] | null } {
+  const n = prev.n, H = prev.H;
+  const anyLock = locks.slice(0, n).some(Boolean);
+  if (!anyLock) return { tpl: generateTemplate(n, H, enabled, seed), map: null };
+
+  const sd = (seed ?? newSeed()) >>> 0;
+  return seeded(sd, () => {
+    // a lock on any slide of a cross-slide layout locks the whole span
+    const locked = prev.layoutAt.map((_, i) => !!locks[i]);
+    for (let i = 0; i < n; i++) {
+      if (!locked[i]) continue;
+      const t = prev.layoutAt[i];
+      if (PATTERNS[t] && PATTERNS[t].span > 1) {
+        let a = i; while (a > 0 && prev.layoutAt[a - 1] === t) a--;
+        let b = i; while (b + 1 < n && prev.layoutAt[b + 1] === t) b++;
+        for (let k = a; k <= b; k++) locked[k] = true;
+      }
+    }
+
+    coreBoxId = prev.boxes.reduce((m, b) => Math.max(m, b.id), 0);
+    const boxes: Box[] = [];
+    const bands: Template["bands"] = [];
+    const layoutAt: string[] = new Array(n);
+    const map: number[] = [];
+
+    let i = 0;
+    while (i < n) {
+      let b = i;
+      while (b + 1 < n && locked[b + 1] === locked[i]) b++;
+      if (locked[i]) {
+        prev.boxes.forEach((bx, oi) => {
+          if (bx.slide >= i && bx.slide <= b) { boxes.push({ ...bx }); map.push(oi); }
+        });
+        prev.bands.forEach(bd => {
+          const sl = Math.round(bd.x / SLIDE_W);
+          if (sl >= i && sl <= b) bands.push({ ...bd });
+        });
+        for (let k = i; k <= b; k++) layoutAt[k] = prev.layoutAt[k];
+      } else {
+        const seq = genSequence(b + 1, enabled, i, layoutAt[i - 1] ?? null);
+        for (const { type: t, span, slide: s0 } of seq) {
+          for (let k = 0; k < span; k++) layoutAt[s0 + k] = t;
+          emitLayout(t, span, s0, H, boxes, bands);
+        }
+        while (map.length < boxes.length) map.push(-1);
+      }
+      i = b + 1;
+    }
+
+    if (enabled.overhang) applyOverhangs(boxes, layoutAt, n, 0, locked);
+
+    return { tpl: { boxes, bands, decor: makeDecor(n, H, enabled), layoutAt, n, H, seed: sd }, map };
+  });
+}
+
+/* ---------- per-slide layout pick ----------
+   Replace the layout covering `slide` with a single-span `type`. If the old
+   layout spanned multiple slides, the other slides of that span fall back to
+   "full". Returns the new template + the same box-index map as shuffleTemplate. */
+export function setSlideLayout(
+  tpl: Template, slide: number, type: string,
+): { tpl: Template; map: number[] } {
+  const t0 = tpl.layoutAt[slide];
+  let a = slide, b = slide;
+  if (PATTERNS[t0] && PATTERNS[t0].span > 1) {
+    while (a > 0 && tpl.layoutAt[a - 1] === t0) a--;
+    while (b + 1 < tpl.n && tpl.layoutAt[b + 1] === t0) b++;
+  }
+
+  coreBoxId = tpl.boxes.reduce((m, x) => Math.max(m, x.id), 0);
+  const layoutAt = tpl.layoutAt.slice();
+  const inserted: Box[] = [];
+  const insBands: Template["bands"] = [];
+  for (let k = a; k <= b; k++) {
+    layoutAt[k] = k === slide ? type : "full";
+    emitLayout(layoutAt[k], 1, k, tpl.H, inserted, insBands);
+  }
+
+  const boxes: Box[] = [];
+  const map: number[] = [];
+  let placed = false;
+  tpl.boxes.forEach((bx, oi) => {
+    if (!bx.manual && bx.slide >= a && bx.slide <= b) {
+      if (!placed) { inserted.forEach(nb => { boxes.push(nb); map.push(-1); }); placed = true; }
+      return;
+    }
+    boxes.push({ ...bx }); map.push(oi);
+  });
+  if (!placed) inserted.forEach(nb => { boxes.push(nb); map.push(-1); });
+
+  const bands = tpl.bands.filter(bd => {
+    const sl = Math.round(bd.x / SLIDE_W);
+    return sl < a || sl > b;
+  }).concat(insBands);
+
+  return { tpl: { ...tpl, boxes, bands, layoutAt }, map };
+}
+
+/* ---------- manual slot ops ---------- */
+
+export function addSlot(tpl: Template, slide: number): Template {
+  coreBoxId = tpl.boxes.reduce((m, x) => Math.max(m, x.id), 0);
+  const w = Math.round(SLIDE_W * 0.62);
+  const h = Math.round(tpl.H * 0.5);
+  const box = makeBox(slide, slide * SLIDE_W + (SLIDE_W - w) / 2, (tpl.H - h) / 2, w, h);
+  box.manual = true;
+  return { ...tpl, boxes: [...tpl.boxes, box] };
+}
+
+export function removeSlot(tpl: Template, index: number): Template {
+  return { ...tpl, boxes: tpl.boxes.filter((_, i) => i !== index) };
+}
+
+/* ---------- shareable look codec (URL-safe base64 JSON) ---------- */
+
+export interface Look {
+  seed?: number;
+  n: number;
+  H: number;
+  enabled: Enabled;
+  paletteIdx: number;
+  bgStyle: string;
+  texture: string;
+  texts: TextBlock[];
+}
+
+export function encodeLook(l: Look): string {
+  const json = JSON.stringify(l);
+  return btoa(unescape(encodeURIComponent(json)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function decodeLook(s: string): Look | null {
+  try {
+    let b = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (b.length % 4) b += "=";
+    const look = JSON.parse(decodeURIComponent(escape(atob(b))));
+    if (!look || typeof look.n !== "number" || typeof look.H !== "number") return null;
+    return look;
+  } catch { return null; }
 }
 
 /* Resize an existing template to `newN` posts WITHOUT reshuffling kept slides.
@@ -460,7 +635,7 @@ export function resizeTemplate(
     // overhangs only across the new join + within the appended region — existing
     // boxes keep their original geometry.
     if (enabled.overhang) applyOverhangs(boxes, layoutAt, newN, oldN - 1);
-    return { boxes, bands, decor: tpl.decor, layoutAt, n: newN, H };
+    return { boxes, bands, decor: tpl.decor, layoutAt, n: newN, H, seed: tpl.seed };
   }
 
   // shrink: keep boxes/bands fully inside the new strip
@@ -481,5 +656,5 @@ export function resizeTemplate(
   }
 
   const decor = tpl.decor.filter(d => d.kind !== "circle" || d.cx <= limit);
-  return { boxes, bands, decor, layoutAt, n: newN, H };
+  return { boxes, bands, decor, layoutAt, n: newN, H, seed: tpl.seed };
 }
