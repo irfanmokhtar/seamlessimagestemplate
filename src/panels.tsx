@@ -127,16 +127,19 @@ function LayoutsSection({ enabled, onToggle, offCount, onShuffle, spinning }: an
   );
 }
 
-function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwapSlots, onAddSlot }: any) {
+function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwapSlots, onAddSlot,
+  pool = [], onUsePool, onPoolToSlot, onRemovePool, onSlotToPool }: any) {
   const slots = tpl.boxes.map((_b: any, i: number) => i);
   const filled = slots.filter((i: number) => photos[i]);
   const empty = slots.length - filled.length;
   const [dragOver, setDragOver] = React.useState<number | null>(null);
+  const [poolOver, setPoolOver] = React.useState(false);
   return (
     <>
       <div className="panelHd">
         <h2>Photos</h2>
-        <p>{filled.length} placed · {empty} empty {empty ? "slot" + (empty > 1 ? "s" : "") : ""}</p>
+        <p>{filled.length} placed · {empty} empty {empty ? "slot" + (empty > 1 ? "s" : "") : ""}
+          {pool.length ? ` · ${pool.length} in pool` : ""}</p>
       </div>
       <button type="button" className="bigAction" onClick={onAddPhotos}>
         {Ic.photos}<span>Add photos</span>
@@ -151,11 +154,18 @@ function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwa
               draggable={!!photos[i]}
               onDragStart={(e) => { e.dataTransfer.setData("seamless/slot", String(i)); e.dataTransfer.effectAllowed = "move"; }}
               onDragOver={(e) => {
-                if ([...e.dataTransfer.types].includes("seamless/slot")) { e.preventDefault(); setDragOver(i); }
+                const types = [...e.dataTransfer.types];
+                if (types.includes("seamless/slot") || types.includes("seamless/pool")) { e.preventDefault(); setDragOver(i); }
               }}
               onDragLeave={() => setDragOver(d => (d === i ? null : d))}
               onDrop={(e) => {
                 e.preventDefault(); setDragOver(null);
+                const types = [...e.dataTransfer.types];
+                if (types.includes("seamless/pool")) {
+                  const pi = Number(e.dataTransfer.getData("seamless/pool"));
+                  if (Number.isInteger(pi)) onPoolToSlot(pi, i);
+                  return;
+                }
                 const from = Number(e.dataTransfer.getData("seamless/slot"));
                 if (Number.isInteger(from) && from !== i) onSwapSlots(from, i);
               }}>
@@ -169,8 +179,37 @@ function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwa
         <button type="button" className="miniBtn" onClick={onAddSlot}>
           {Ic.plus}<span>Add photo slot</span>
         </button>
+
+        {pool.length > 0 && (
+          <section className="pGroup poolGroup">
+            <h3>Photo pool <span className="poolCount">{pool.length}</span></h3>
+            <div className={"photoTray poolTray" + (poolOver ? " dragOver" : "")}
+              onDragOver={(e) => {
+                if ([...e.dataTransfer.types].includes("seamless/slot")) { e.preventDefault(); setPoolOver(true); }
+              }}
+              onDragLeave={() => setPoolOver(false)}
+              onDrop={(e) => {
+                e.preventDefault(); setPoolOver(false);
+                const from = Number(e.dataTransfer.getData("seamless/slot"));
+                if (Number.isInteger(from)) onSlotToPool(from);
+              }}>
+              {pool.map((p: any, idx: number) => (
+                <button key={p.id} type="button" className="trayItem poolItem"
+                  onClick={() => onUsePool(idx)}
+                  title="Click to place in the selected (or next empty) slot — drag onto a slot to place"
+                  draggable
+                  onDragStart={(e) => { e.dataTransfer.setData("seamless/pool", String(idx)); e.dataTransfer.effectAllowed = "move"; }}>
+                  <img src={p.url} alt="" draggable={false} />
+                  <span className="trayX" title="Remove from pool"
+                    onClick={(e) => { e.stopPropagation(); onRemovePool(idx); }}>×</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
-      <p className="panelFoot">Drop images onto the canvas to fill empty slots. Drag tray photos onto each other to swap.</p>
+      <p className="panelFoot">Add more photos than slots — extras wait in the pool. Shuffle fills empty slots from it,
+        or click a pool photo to place it. Drag a slot photo here to send it back.</p>
     </>
   );
 }

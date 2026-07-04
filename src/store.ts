@@ -22,6 +22,7 @@ export interface DocRecord {
   texts: TextBlock[];
   panzoom: Record<number, Panzoom>;
   photoIds: (string | null)[];
+  poolIds?: string[]; // extra uploaded photos not assigned to any slot
   locks: boolean[];
 }
 
@@ -83,7 +84,10 @@ export const getPhoto = (id: string) =>
 export async function gcPhotos(): Promise<void> {
   const docs = await getAllDocs();
   const referenced = new Set<string>();
-  for (const d of docs) for (const pid of d.photoIds || []) if (pid) referenced.add(pid);
+  for (const d of docs) {
+    for (const pid of d.photoIds || []) if (pid) referenced.add(pid);
+    for (const pid of d.poolIds || []) if (pid) referenced.add(pid);
+  }
   const ids = await tx<IDBValidKey[]>("photos", "readonly", s => s.getAllKeys());
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {

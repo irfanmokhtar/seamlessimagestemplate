@@ -101,6 +101,9 @@ export function App() {
 
   const [photos, setPhotos] = React.useState<(string | null)[]>(() => []);
   const [photoIds, setPhotoIds] = React.useState<(string | null)[]>(() => []);
+  // pool = extra uploaded photos not assigned to any slot (reservoir for
+  // shuffle-fill + manual placement). Kept separate from the slot arrays.
+  const [pool, setPool] = React.useState<{ id: string; url: string }[]>(() => []);
   const [panzoom, setPanzoom] = React.useState<Record<number, any>>({});
   const [viewMode, setViewMode] = React.useState<ViewMode>("strip");
   const [tab, setTab] = React.useState("layouts");
@@ -142,7 +145,7 @@ export function App() {
     window.history.replaceState(null, "", location.pathname + location.search);
 
   /* ----- doc lifecycle ----- */
-  const hydrate = (rec: DocRecord, urls: (string | null)[]) => {
+  const hydrate = (rec: DocRecord, urls: (string | null)[], poolUrls: { id: string; url: string }[] = []) => {
     setDocId(rec.id);
     setDocName(rec.name);
     setHistory(rec.history?.length ? rec.history : [generateTemplate(rec.n, rec.H, rec.enabled)]);
@@ -158,6 +161,7 @@ export function App() {
     setLocks(rec.locks || []);
     setPhotoIds(rec.photoIds || []);
     setPhotos(urls);
+    setPool(poolUrls);
     setSelected(null); setSelText(null);
     setViewMode("strip"); setTab("layouts");
     setScreen("editor");
@@ -165,7 +169,11 @@ export function App() {
 
   const openDoc = async (rec: DocRecord) => {
     const urls = await loadPhotoUrls(rec.photoIds || []);
-    hydrate(rec, urls);
+    const poolResolved = await loadPhotoUrls(rec.poolIds || []);
+    const poolUrls = (rec.poolIds || [])
+      .map((id, i) => ({ id, url: poolResolved[i] }))
+      .filter((p): p is { id: string; url: string } => !!p.id && !!p.url);
+    hydrate(rec, urls, poolUrls);
   };
 
   const openNewDoc = (look?: ReturnType<typeof decodeLook>) => {
@@ -187,9 +195,10 @@ export function App() {
       texts: look?.texts ?? [],
       panzoom: {},
       photoIds: [],
+      poolIds: [],
       locks: [],
     };
-    hydrate(rec, []);
+    hydrate(rec, [], []);
   };
 
   /* autosave (debounced) — everything a doc needs to reopen exactly */
@@ -199,7 +208,7 @@ export function App() {
     return {
       id: docId, name: docName, updatedAt: Date.now(),
       history, cursor, n, H, paletteIdx, bgStyle, texture, enabled,
-      texts, panzoom, photoIds, locks,
+      texts, panzoom, photoIds, poolIds: pool.map(p => p.id), locks,
     };
   };
   const buildRecRef = React.useRef(buildRec);
@@ -213,7 +222,7 @@ export function App() {
     }, 800);
     return () => clearTimeout(saveTimer.current);
   }, [screen, docId, docName, history, cursor, n, H, paletteIdx, bgStyle, texture,
-    enabled, texts, panzoom, photoIds, locks]);
+    enabled, texts, panzoom, photoIds, pool, locks]);
 
   const goHome = async () => {
     const rec = buildRecRef.current();
@@ -260,8 +269,25 @@ export function App() {
     if (nn === tpl.n && hh === tpl.H) {
       // shuffle in place — locked slides keep boxes AND their photos
       const { tpl: next, map } = shuffleTemplate(tpl, en, locks);
-      if (map) { applyMap(map); pushTemplate(next, true); setSelected(null); }
-      else pushTemplate(next);
+      if (map) {
+        // remap keeps existing photos glued to surviving boxes …
+        const newPhotos = remapArr(photos, map);
+        const newIds = remapArr(photoIds, map);
+        const newPz: Record<number, any> = {};
+        map.forEach((m, j) => { if (m >= 0 && panzoom[m]) newPz[j] = panzoom[m]; });
+        // … then fill any empty unlocked slot from the pool (random pick)
+        const bag = shuffleArr(pool);
+        const taken = new Set<string>();
+        next.boxes.forEach((b: Box, i: number) => {
+          if (!newPhotos[i] && !locks[b.slide] && bag.length) {
+            const e = bag.shift()!;
+            newPhotos[i] = e.url; newIds[i] = e.id; taken.add(e.id);
+          }
+        });
+        setPhotos(newPhotos); setPhotoIds(newIds); setPanzoom(newPz);
+        if (taken.size) setPool(p => p.filter(e => !taken.has(e.id)));
+        pushTemplate(next, true); setSelected(null);
+      } else pushTemplate(next);
     } else {
       pushTemplate(generateTemplate(nn, hh, en));
     }
@@ -354,26 +380,67 @@ export function App() {
 
   const fillEmpty = async (files: File[]) => {
     const entries = await Promise.all(files.map(registerFile));
-    let placed = 0;
-    setPhotos(prev => {
-      const next = [...prev];
-      let cur = 0;
-      for (let i = 0; i < tpl.boxes.length && cur < entries.length; i++) {
-        if (!next[i]) next[i] = entries[cur++].url;
-      }
-      placed = cur;
-      return next;
+    // fill empty slots in order; the rest overflow into the pool
+    const emptyIdx: number[] = [];
+    for (let i = 0; i < tpl.boxes.length; i++) if (!photos[i]) emptyIdx.push(i);
+    const place = entries.slice(0, emptyIdx.length);
+    const overflow = entries.slice(emptyIdx.length);
+    if (place.length) {
+      setPhotos(prev => { const nx = [...prev]; place.forEach((e, k) => nx[emptyIdx[k]] = e.url); return nx; });
+      setPhotoIds(prev => { const nx = [...prev]; place.forEach((e, k) => nx[emptyIdx[k]] = e.id); return nx; });
+    }
+    if (overflow.length) setPool(p => [...p, ...overflow.map(e => ({ id: e.id, url: e.url }))]);
+    const parts: string[] = [];
+    if (place.length) parts.push(`${place.length} placed`);
+    if (overflow.length) parts.push(`${overflow.length} to pool`);
+    showToast(`Added ${entries.length} photo${entries.length > 1 ? "s" : ""}` +
+      (parts.length ? ` · ${parts.join(" · ")}` : ""));
+  };
+
+  /* ----- pool ↔ slots ----- */
+  const shuffleArr = <T,>(arr: T[]): T[] => {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  // move a pool photo into a slot; any photo it displaces returns to the pool
+  const poolToSlot = (poolIdx: number, slot: number) => {
+    const p = pool[poolIdx];
+    if (!p || !tpl.boxes[slot]) return;
+    const prevId = photoIds[slot], prevUrl = photos[slot];
+    setPhotos(a => { const nx = [...a]; nx[slot] = p.url; return nx; });
+    setPhotoIds(a => { const nx = [...a]; nx[slot] = p.id; return nx; });
+    setPanzoom(pz => { const nx = { ...pz }; delete nx[slot]; return nx; });
+    setPool(cur => {
+      const nx = cur.filter((_, k) => k !== poolIdx);
+      if (prevId) nx.push({ id: prevId, url: prevUrl as string });
+      return nx;
     });
-    setPhotoIds(prev => {
-      const next = [...prev];
-      let cur = 0;
-      for (let i = 0; i < tpl.boxes.length && cur < entries.length; i++) {
-        if (!next[i]) next[i] = entries[cur++].id;
-      }
-      return next;
-    });
-    if (placed < entries.length) showToast("All slots are full — ⌥ click a photo to free one");
-    else showToast(`Added ${entries.length} photo${entries.length > 1 ? "s" : ""}`);
+  };
+
+  // click a pool photo: drop it into the selected slot, else the first empty one
+  const usePoolPhoto = (poolIdx: number) => {
+    let slot = (selected != null && tpl.boxes[selected]) ? selected : -1;
+    if (slot < 0) slot = tpl.boxes.findIndex((_b: Box, i: number) => !photos[i]);
+    if (slot < 0) { showToast("Select a slot to place it in"); return; }
+    poolToSlot(poolIdx, slot);
+  };
+
+  const removePoolPhoto = (poolIdx: number) =>
+    setPool(p => p.filter((_, k) => k !== poolIdx));
+
+  // pull a slot's photo out into the pool, leaving the slot empty
+  const slotToPool = (slot: number) => {
+    const id = photoIds[slot], url = photos[slot];
+    if (!id) return;
+    setPhotos(a => { const nx = [...a]; nx[slot] = null; return nx; });
+    setPhotoIds(a => { const nx = [...a]; nx[slot] = null; return nx; });
+    setPanzoom(pz => { const nx = { ...pz }; delete nx[slot]; return nx; });
+    setPool(p => [...p, { id, url: url as string }]);
   };
 
   const onPickerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -644,6 +711,8 @@ export function App() {
           tpl={tpl} photos={photos} onAddPhotos={() => openPicker(null)}
           onSelectSlot={(i: number) => { setSelected(i); setSelText(null); }} selected={selected}
           onSwapSlots={swapSlots} onAddSlot={addSlotHere}
+          pool={pool} onUsePool={usePoolPhoto} onPoolToSlot={poolToSlot}
+          onRemovePool={removePoolPhoto} onSlotToPool={slotToPool}
           texts={texts} selText={selText} onAddText={addText} onUpdateText={updateText}
           onRemoveText={removeText} onSelectText={selectText} onDuplicateText={duplicateText}
           panzoom={panzoom} onStraighten={onStraighten} onFitPhoto={onFitPhoto} />

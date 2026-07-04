@@ -307,6 +307,27 @@ button { font-family: inherit; }
 }
 .trayItem.empty em { display: none; }
 
+/* photo pool (extra photos beyond the slot count) */
+.poolGroup { margin-top: 14px; }
+.poolCount {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px;
+  padding: 0 5px; margin-left: 6px; border-radius: 9px;
+  background: var(--accent); color: #fff;
+  font: 600 10.5px "Hanken Grotesk", sans-serif;
+}
+.poolTray { padding: 6px; border: 1px dashed var(--border); border-radius: 10px; }
+.poolTray.dragOver { border-color: var(--accent); border-style: solid; background: var(--inset); }
+.poolItem { aspect-ratio: 1/1; cursor: grab; }
+.poolItem:active { cursor: grabbing; }
+.trayX {
+  position: absolute; top: 3px; right: 3px; width: 17px; height: 17px;
+  display: grid; place-items: center; border-radius: 50%;
+  background: rgba(0,0,0,0.6); color: #fff; font-size: 13px; line-height: 1;
+  opacity: 0; transition: opacity 0.12s;
+}
+.poolItem:hover .trayX { opacity: 1; }
+.trayX:hover { background: var(--danger, #e4572e); }
+
 /* text section + faux controls */
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > label {
