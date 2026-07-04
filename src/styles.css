@@ -334,6 +334,49 @@ button { font-family: inherit; }
 .fauxSeg.on { background: var(--surface); color: var(--ink); border-color: var(--border-2); }
 .disabled { opacity: 0.55; pointer-events: none; }
 
+/* text blocks panel */
+.textArea { resize: vertical; min-height: 38px; line-height: 1.35; }
+.selectField {
+  background: var(--inset); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 13px; width: 100%; outline: none;
+  transition: border-color 0.14s; cursor: pointer;
+}
+.selectField:focus { border-color: var(--accent); }
+.textList { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.textListItem {
+  text-align: left; padding: 8px 10px; border-radius: 8px;
+  background: var(--inset); border: 1px solid var(--border);
+  color: var(--ink-2); font-size: 13px; overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis; cursor: pointer; transition: border-color 0.14s, background 0.14s;
+}
+.textListItem:hover { background: var(--surface-2); }
+.textListItem.on { border-color: var(--accent); color: var(--ink); }
+.textEditor { display: flex; flex-direction: column; gap: 14px; }
+.colorRow { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.colorDot {
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 1.5px solid var(--border-2); cursor: pointer; position: relative;
+  display: grid; place-items: center; font-size: 10px; font-weight: 700; color: var(--ink-2);
+}
+.colorDot.on { box-shadow: 0 0 0 2px var(--editor-bg, var(--surface)), 0 0 0 3.5px var(--accent); }
+.colorDot.auto { background: repeating-conic-gradient(var(--inset) 0% 25%, var(--surface-2) 0% 50%) 50% / 10px 10px; }
+.colorDot.custom { overflow: hidden; color: var(--ink-3); }
+.colorDot.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.toggleRow { display: flex; gap: 8px; }
+.pillToggle {
+  flex: 1; display: flex; align-items: center; gap: 7px; justify-content: center;
+  padding: 7px 8px; border-radius: 8px; cursor: pointer;
+  background: var(--inset); border: 1px solid var(--border);
+  font-size: 11.5px; color: var(--ink-2); transition: border-color 0.14s, color 0.14s;
+}
+.pillToggle.on { border-color: var(--accent); color: var(--ink); }
+.pillBox {
+  width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center;
+  border: 1.5px solid var(--border-2); color: #fff;
+}
+.pillToggle.on .pillBox { background: var(--accent); border-color: var(--accent); }
+
 .soonHero {
   display: grid; place-items: center; height: 96px; border-radius: 11px;
   background: var(--inset); color: var(--ink-3); border: 1px dashed var(--border-2);
@@ -469,12 +512,11 @@ button { font-family: inherit; }
 .selH.bl { left: -4px; bottom: -4px; }
 .selH.br { right: -4px; bottom: -4px; }
 
-.stripTitle {
-  position: absolute; transform: translate(-50%, -50%);
-  font-family: Georgia, "Times New Roman", serif; font-weight: 600;
-  white-space: nowrap; z-index: 20; pointer-events: none;
-  text-shadow: 0 2px 14px rgba(0,0,0,0.25);
-  transition: font-size var(--morph), left var(--morph), top var(--morph);
+.textBlock { outline: none; }
+.textBlock.selected {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 6px;
+  border-radius: 2px;
 }
 .textureOverlay {
   position: absolute; inset: 0; z-index: 25;

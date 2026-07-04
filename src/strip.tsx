@@ -6,8 +6,8 @@
    transition — the seamless concept, demonstrated by the UI itself. */
 
 import React from "react";
-import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance } from "./core";
-import type { Box, Palette, Panzoom, StripApi } from "./types";
+import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover, fontStack } from "./core";
+import type { Box, Palette, Panzoom, StripApi, TextBlock } from "./types";
 
 const GRAIN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
 const PAPER_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04 0.09' numOctaves='3'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23p)'/%3E%3C/svg%3E\")";
@@ -18,7 +18,7 @@ export const natCache: Record<string, { w: number; h: number }> = {};
 export function clampPan(box: Box, pz: Panzoom, src: string | null): Panzoom {
   const nat = src ? natCache[src] : null;
   if (!nat) return pz;
-  const base = Math.max(box.w / nat.w, box.h / nat.h) * pz.z;
+  const base = Math.max(box.w / nat.w, box.h / nat.h) * pz.z * rotCover(box.w, box.h, pz.r || 0);
   const maxX = Math.max(0, (nat.w * base - box.w) / 2);
   const maxY = Math.max(0, (nat.h * base - box.h) / 2);
   return {
@@ -34,11 +34,12 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   box: Box; index: number; s: number; palette: Palette; api: StripApi; selected: boolean;
 }) {
   const src = api.photos[index] || null;
-  const pzRaw = api.panzoom[index] || { x: 0, y: 0, z: 1 };
+  const pzRaw = api.panzoom[index] || { x: 0, y: 0, z: 1, r: 0 };
   const pz = src ? clampPan(box, pzRaw, src) : pzRaw;
   const ref = React.useRef<HTMLDivElement>(null);
-  const drag = React.useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const drag = React.useRef<any>(null);
   const [over, setOver] = React.useState(false);
+  const [, force] = React.useState(0);
 
   // non-passive wheel for zoom
   React.useEffect(() => {
@@ -56,13 +57,27 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   const onPointerDown = (e: React.PointerEvent) => {
     if (!api.interactive || e.button !== 0) return;
     if (e.altKey) return; // handled in click
-    if (src) {
+    if (!src) return;
+    if (api.rotateMode) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      drag.current = { rot: true, cx, cy, ang: Math.atan2(e.clientY - cy, e.clientX - cx), moved: false };
+    } else {
       drag.current = { x: e.clientX, y: e.clientY, moved: false };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     }
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag.current) return;
+    if (drag.current.rot) {
+      const a = Math.atan2(e.clientY - drag.current.cy, e.clientX - drag.current.cx);
+      let d = a - drag.current.ang;
+      if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+      drag.current.ang = a;
+      drag.current.moved = true;
+      api.onRotate?.(index, d * 180 / Math.PI, box);
+      return;
+    }
     let dx = (e.clientX - drag.current.x) / s;
     let dy = (e.clientY - drag.current.y) / s;
     if (box.rot) {
@@ -104,6 +119,26 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
 
   const small = box.w * s < 90 || box.h * s < 70;
 
+  // Render image at its cover size (overflowing the box) so panning reveals
+  // other parts of the photo rather than the background. clampPan uses the same
+  // cover math. Before natural size is known, fall back to CSS object-fit cover.
+  const nat = src ? natCache[src] : null;
+  const rot = pz.r || 0;
+  const tf = `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z}) rotate(${rot}deg)`;
+  let imgStyle: React.CSSProperties;
+  if (nat) {
+    const cover = Math.max(box.w / nat.w, box.h / nat.h) * rotCover(box.w, box.h, rot);
+    const iw = nat.w * cover * s, ih = nat.h * cover * s;
+    imgStyle = {
+      position: "absolute",
+      width: iw, height: ih,
+      left: (box.w * s - iw) / 2, top: (box.h * s - ih) / 2,
+      transform: tf,
+    };
+  } else {
+    imgStyle = { transform: tf };
+  }
+
   return (
     <div ref={ref} className={"photoBox" + (over ? " dropOver" : "") + (selected ? " selected" : "")} style={style}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
@@ -121,9 +156,11 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
           <img src={src} alt="" draggable={false}
             onLoad={(e) => {
               const img = e.target as HTMLImageElement;
+              const known = !!natCache[src];
               natCache[src] = { w: img.naturalWidth, h: img.naturalHeight };
+              if (!known) force(v => v + 1);
             }}
-            style={{ transform: `translate(${pz.x * s}px, ${pz.y * s}px) scale(${pz.z})` }} />
+            style={imgStyle} />
         ) : (
           <div className="placeholder" style={{
             background: palette.ph, color: rgba(palette.ink, 0.9),
@@ -145,20 +182,81 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
   );
 }
 
+/* ---------- a free text block ---------- */
+
+function TextItem({ t, s, vs, palette, api }: {
+  t: TextBlock; s: number; vs: number; palette: Palette; api: StripApi;
+}) {
+  const drag = React.useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const selected = !!api.interactive && api.selText === t.id;
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!api.interactive || e.button !== 0) return;
+    e.stopPropagation();
+    drag.current = { x: e.clientX, y: e.clientY, moved: false };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    const dx = (e.clientX - drag.current.x) / s;
+    const dy = (e.clientY - drag.current.y) / s;
+    if (Math.abs(dx) + Math.abs(dy) > 0) drag.current.moved = true;
+    drag.current.x = e.clientX;
+    drag.current.y = e.clientY;
+    api.onTextMove?.(t.id, dx, dy);
+  };
+  const onPointerUp = () => { setTimeout(() => { drag.current = null; }, 0); };
+  const onClick = (e: React.MouseEvent) => {
+    if (!api.interactive) return;
+    e.stopPropagation();
+    if (drag.current && drag.current.moved) return;
+    api.onTextSelect?.(t.id);
+  };
+
+  const anchorX = t.align === "center" ? "-50%" : t.align === "right" ? "-100%" : "0";
+  const style: React.CSSProperties = {
+    position: "absolute",
+    left: t.x * s, top: t.y * s,
+    transform: `translate(${anchorX}, -50%)`,
+    fontFamily: fontStack(t.font),
+    fontWeight: t.weight,
+    fontStyle: t.italic ? "italic" : "normal",
+    fontSize: t.size * vs * s,
+    letterSpacing: t.letterSpacing * vs * s,
+    textAlign: t.align,
+    color: t.color === "auto" ? palette.text : t.color,
+    whiteSpace: "pre",
+    lineHeight: 1.1,
+    zIndex: 20,
+    textShadow: "0 2px 14px rgba(0,0,0,0.22)",
+    cursor: api.interactive ? "move" : "default",
+    pointerEvents: api.interactive ? "auto" : "none",
+    userSelect: "none",
+  };
+
+  return (
+    <div className={"textBlock" + (selected ? " selected" : "")} style={style}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp} onClick={onClick}>
+      {t.upper ? t.text.toUpperCase() : t.text}
+    </div>
+  );
+}
+
 /* ---------- full strip content (one copy per slide window) ---------- */
 
-export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, selected }: any) {
+export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, selected }: any) {
   const stripW = tpl.n * SLIDE_W * s;
   const H = tpl.H * s;
   const p: Palette = palette;
   const firstSrc = api.photos.find(Boolean) || null;
+  const vs = tpl.H / 1350;
 
   let bg = p.bg;
   if (bgStyle === "gradient") {
     bg = `linear-gradient(135deg, ${shade(p.bg, 0.04)}, ${shade(p.bg, -0.06)})`;
   }
   const bandColor = p.name === "Charcoal" ? "#000000" : "#1B1B1B";
-  const titleSize = 120 * (tpl.H / 1350) * s;
 
   return (
     <div className="stripContent" style={{ width: stripW, height: H, background: bg }}>
@@ -170,8 +268,8 @@ export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, se
         </div>
       )}
 
-      {/* blurred photo backdrops behind framed slots */}
-      {tpl.boxes.map((b: Box, i: number) => (b.blurBg && api.photos[i]) ? (
+      {/* blurred photo backdrops behind framed slots (blur bg style only) */}
+      {bgStyle === "blurpano" && tpl.boxes.map((b: Box, i: number) => (b.blurBg && api.photos[i]) ? (
         <div key={"bb" + i} className="blurBgSlide" style={{
           left: b.slide * SLIDE_W * s, width: SLIDE_W * s, height: H,
         }}>
@@ -225,16 +323,10 @@ export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, se
           selected={selected === i} />
       ))}
 
-      {/* title */}
-      {title.trim() && (
-        <div className="stripTitle" style={{
-          left: (tpl.n > 1 ? SLIDE_W : SLIDE_W / 2) * s,
-          top: Math.max(titleSize / s, tpl.H * 0.14) * s,
-          fontSize: titleSize,
-          letterSpacing: 6 * s,
-          color: p.text,
-        }}>{title.toUpperCase()}</div>
-      )}
+      {/* text blocks */}
+      {(texts || []).map((t: TextBlock) => (
+        <TextItem key={t.id} t={t} s={s} vs={vs} palette={p} api={api} />
+      ))}
 
       {/* texture */}
       {texture !== "none" && (
@@ -251,7 +343,7 @@ export function StripContent({ tpl, palette, bgStyle, texture, title, s, api, se
 
 /* ---------- strip stage: slide windows that pull apart ---------- */
 
-export function StripStage({ tpl, palette, bgStyle, texture, title, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect }: any) {
+export function StripStage({ tpl, palette, bgStyle, texture, texts, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect }: any) {
   const wrapRef = React.useRef<HTMLDivElement>(null);
   const [avail, setAvail] = React.useState({ w: 1200, h: 600 });
 
@@ -282,7 +374,8 @@ export function StripStage({ tpl, palette, bgStyle, texture, title, viewMode, sh
       onDrop={(e) => { e.preventDefault(); onStageDrop(e); }}>
       <div className="stageScroll"
         onPointerDown={(e) => {
-          if (onClearSelect && !(e.target as HTMLElement).closest(".photoBox")) onClearSelect();
+          const el = e.target as HTMLElement;
+          if (onClearSelect && !el.closest(".photoBox") && !el.closest(".textBlock")) onClearSelect();
         }}>
         <div className={"stage" + (posts ? " postsMode" : "")}
           style={{ width: totalW, height: tpl.H * s + (posts ? captionH : 0) }}>
@@ -292,7 +385,7 @@ export function StripStage({ tpl, palette, bgStyle, texture, title, viewMode, sh
               style={{ left: i * (slideW + gap), width: slideW, height: tpl.H * s }}>
               <div className="slideInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
                 <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                  texture={texture} title={title} s={s} api={api} selected={selected} />
+                  texture={texture} texts={texts} s={s} api={api} selected={selected} />
               </div>
               {showGuides && !posts && i > 0 && <div className="boundaryGuide"></div>}
               <div className="slideChip">{i + 1}</div>

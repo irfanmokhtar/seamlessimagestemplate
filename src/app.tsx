@@ -1,12 +1,12 @@
 /* app.tsx — Seamless editor: state, wiring, layout. */
 
 import React from "react";
-import { PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate } from "./core";
+import { PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate, resizeTemplate, newTextBlock } from "./core";
 import { clampPan } from "./strip";
 import { StripStage } from "./strip";
 import { TopBar, LeftRail, LeftPanel, Inspector, BottomStrip } from "./panels";
 import { ExportModal, Toast } from "./modal";
-import type { Box, Enabled, BgStyle, Texture, ViewMode } from "./types";
+import type { Box, Enabled, BgStyle, Texture, ViewMode, TextBlock } from "./types";
 
 const ALL_KEYS = [...Object.keys(PATTERNS), ...DECOR_KEYS];
 // ribbon + circles decor start off — they read as busy on a fresh canvas
@@ -46,14 +46,19 @@ export function App() {
   const [bgStyle, setBgStyle] = React.useState<BgStyle>(
     () => saved.bgStyle === "white" ? "flat" : (saved.bgStyle || "flat"));
   const [texture, setTexture] = React.useState<Texture>(() => saved.texture || "grain");
-  const [title, setTitle] = React.useState<string>(() => saved.title || "");
+  const [texts, setTexts] = React.useState<TextBlock[]>(() => {
+    if (Array.isArray(saved.texts)) return saved.texts.map((t: any) => ({ ...newTextBlock(), ...t }));
+    if (typeof saved.title === "string" && saved.title.trim())
+      return [newTextBlock({ text: saved.title })];
+    return [];
+  });
   const [enabled, setEnabled] = React.useState<Enabled>(
     () => ({ ...defaultEnabled(), ...(saved.enabled || {}) }));
 
   // persist settings (theme persists separately)
   React.useEffect(() => {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ enabled, bgStyle, texture, title, paletteIdx }));
-  }, [enabled, bgStyle, texture, title, paletteIdx]);
+    localStorage.setItem(STORE_KEY, JSON.stringify({ enabled, bgStyle, texture, texts, paletteIdx }));
+  }, [enabled, bgStyle, texture, texts, paletteIdx]);
 
   const [history, setHistory] = React.useState(
     () => [generateTemplate(5, 1350, { ...defaultEnabled(), ...(saved.enabled || {}) })]);
@@ -65,6 +70,7 @@ export function App() {
   const [viewMode, setViewMode] = React.useState<ViewMode>("strip");
   const [tab, setTab] = React.useState("layouts");
   const [selected, setSelected] = React.useState<number | null>(null);
+  const [selText, setSelText] = React.useState<number | null>(null);
   const [zoom, setZoom] = React.useState(0.66);
   const [exportOpen, setExportOpen] = React.useState(false);
   const [toast, setToast] = React.useState<{ msg: string; id: number } | null>(null);
@@ -81,15 +87,14 @@ export function App() {
   };
 
   /* ----- template + history (undo / redo) ----- */
-  const pushTemplate = (newTpl: any) => {
+  const pushTemplate = (newTpl: any, preserve = false) => {
     setHistory(h => {
       const trimmed = h.slice(0, cursor + 1);
       const next = [...trimmed, newTpl];
       return next.length > 24 ? next.slice(next.length - 24) : next;
     });
     setCursor(c => Math.min(c + 1, 23));
-    setPanzoom({});
-    setSelected(null);
+    if (!preserve) { setPanzoom({}); setSelected(null); }
   };
 
   const regenerate = (nn = n, hh = H, en = enabled) => {
@@ -118,14 +123,17 @@ export function App() {
         e.preventDefault();
         if (e.shiftKey) redo(); else undo();
       } else if (e.key === "Escape") {
-        setSelected(null);
+        setSelected(null); setSelText(null);
       }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   });
 
-  const changeN = (v: number) => { setN(v); regenerate(v, H, enabled); };
+  const changeN = (v: number) => {
+    setN(v);
+    pushTemplate(resizeTemplate(tpl, v, H, enabled), true);
+  };
   const changeH = (v: number) => { setH(v); regenerate(n, v, enabled); };
   const togglePattern = (k: string) => {
     const next = { ...enabled, [k]: enabled[k] === false };
@@ -169,7 +177,11 @@ export function App() {
 
   const api = {
     photos, panzoom, interactive: true,
-    onSelect: (i: number) => setSelected(i),
+    texts, selText,
+    onTextSelect: (id: number) => { setSelText(id); setSelected(null); setTab("text"); },
+    onTextMove: (id: number, dx: number, dy: number) =>
+      setTexts(ts => ts.map(t => t.id === id ? { ...t, x: t.x + dx, y: t.y + dy } : t)),
+    onSelect: (i: number) => { setSelected(i); setSelText(null); },
     onSlotClick: (i: number) => openPicker(i),
     onDropFile: (i: number, file: File) => {
       const src = URL.createObjectURL(file);
@@ -194,6 +206,14 @@ export function App() {
         return { ...pz, [i]: { ...cur, z: clamp(cur.z * f, 1, 4) } };
       });
     },
+    rotateMode: tab === "crop",
+    onRotate: (i: number, dDeg: number, box: Box) => {
+      setPanzoom(pz => {
+        const cur = pz[i] || { x: 0, y: 0, z: 1, r: 0 };
+        const r = clamp((cur.r || 0) + dDeg, -45, 45);
+        return { ...pz, [i]: clampPan(box, { ...cur, r }, photos[i]) };
+      });
+    },
   };
 
   /* inspector actions */
@@ -205,7 +225,29 @@ export function App() {
     const box = tpl.boxes[i];
     if (box) api.onPan(i, dx, dy, box);
   };
-  const onFitPhoto = (i: number) => setPanzoom(pz => ({ ...pz, [i]: { x: 0, y: 0, z: 1 } }));
+  const onFitPhoto = (i: number) => setPanzoom(pz => ({ ...pz, [i]: { x: 0, y: 0, z: 1, r: 0 } }));
+  const onStraighten = (i: number, deg: number) => setPanzoom(pz => {
+    const cur = pz[i] || { x: 0, y: 0, z: 1, r: 0 };
+    const box = tpl.boxes[i];
+    return { ...pz, [i]: clampPan(box, { ...cur, r: deg }, photos[i]) };
+  });
+
+  /* ----- text blocks ----- */
+  const addText = () => {
+    // drop new block near the top-centre of the post currently in view
+    const slide = activePost ?? 0;
+    const block = newTextBlock({ x: slide * SLIDE_W + SLIDE_W / 2, y: H * 0.16 });
+    setTexts(ts => [...ts, block]);
+    setSelText(block.id); setSelected(null);
+    if (tab !== "text") setTab("text");
+  };
+  const updateText = (id: number, patch: Partial<TextBlock>) =>
+    setTexts(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
+  const removeText = (id: number) => {
+    setTexts(ts => ts.filter(t => t.id !== id));
+    setSelText(s => s === id ? null : s);
+  };
+  const selectText = (id: number) => { setSelText(id); setSelected(null); };
 
   const onStageDrop = (e: React.DragEvent) => {
     const files = [...e.dataTransfer.files].filter(f => f.type.startsWith("image/"));
@@ -248,18 +290,20 @@ export function App() {
           enabled={enabled} onToggle={togglePattern} offCount={offCount}
           onShuffle={() => regenerate()} spinning={spinning}
           tpl={tpl} photos={photos} onAddPhotos={() => openPicker(null)}
-          onSelectSlot={(i: number) => setSelected(i)} selected={selected}
-          title={title} onTitle={setTitle} />
+          onSelectSlot={(i: number) => { setSelected(i); setSelText(null); }} selected={selected}
+          texts={texts} selText={selText} onAddText={addText} onUpdateText={updateText}
+          onRemoveText={removeText} onSelectText={selectText}
+          panzoom={panzoom} onStraighten={onStraighten} onFitPhoto={onFitPhoto} />
 
         <div className="workspace">
           <main className="canvasArea">
             <StripStage tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
-              title={title} viewMode={viewMode} showGuides={true}
+              texts={texts} viewMode={viewMode} showGuides={true}
               api={api} onStageDrop={onStageDrop} zoom={zoom}
-              selected={selected} onClearSelect={() => setSelected(null)} />
+              selected={selected} onClearSelect={() => { setSelected(null); setSelText(null); }} />
           </main>
           <BottomStrip tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
-            title={title} api={api} activePost={activePost} onSelectPost={selectPost}
+            texts={texts} api={api} activePost={activePost} onSelectPost={selectPost}
             onAddPost={addPost} n={n} />
         </div>
 
@@ -268,11 +312,12 @@ export function App() {
           onPalette={setPaletteIdx} onN={changeN} onH={changeH}
           onBgStyle={setBgStyle} onTexture={setTexture}
           onReplace={openPicker} onRemove={api.onRemove}
-          onZoomTo={onZoomTo} onNudge={onNudge} onFitPhoto={onFitPhoto} />
+          onZoomTo={onZoomTo} onNudge={onNudge} onFitPhoto={onFitPhoto}
+          onStraighten={onStraighten} />
       </div>
 
       <ExportModal open={exportOpen} onClose={() => setExportOpen(false)}
-        tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} title={title} api={api}
+        tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} texts={texts} api={api}
         onConfirm={() => {
           setExportOpen(false);
           showToast(`${tpl.n} PNGs downloaded — upload them in order as one carousel`);

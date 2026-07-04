@@ -6,7 +6,7 @@ import { Ic } from "./icons";
 import { StripContent } from "./strip";
 import { exportSlides } from "./export";
 
-export function ExportModal({ open, onClose, tpl, palette, bgStyle, texture, title, api, onConfirm }: any) {
+export function ExportModal({ open, onClose, tpl, palette, bgStyle, texture, texts, api, onConfirm }: any) {
   const [busy, setBusy] = React.useState(false);
   if (!open) return null;
   const s = Math.min(0.085, 380 / (tpl.H * 4));
@@ -15,7 +15,7 @@ export function ExportModal({ open, onClose, tpl, palette, bgStyle, texture, tit
   const download = async () => {
     setBusy(true);
     await exportSlides({
-      tpl, palette, bgStyle, texture, title,
+      tpl, palette, bgStyle, texture, texts,
       photos: api.photos, panzoom: api.panzoom,
     });
     setBusy(false);
@@ -38,7 +38,7 @@ export function ExportModal({ open, onClose, tpl, palette, bgStyle, texture, tit
               <div className="exportClip" style={{ width: slideW, height: tpl.H * s }}>
                 <div style={{ transform: `translateX(${-i * slideW}px)` }}>
                   <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                    texture={texture} title={title} s={s}
+                    texture={texture} texts={texts} s={s}
                     api={{ ...api, interactive: false }} />
                 </div>
               </div>
