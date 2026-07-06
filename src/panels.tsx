@@ -2,7 +2,7 @@
    right contextual inspector, bottom slide strip. */
 
 import React from "react";
-import { PATTERNS, PATTERN_INFO, DECOR_KEYS, RATIOS, SLIDE_W, PALETTES, FONTS, fontStack } from "./core";
+import { PATTERNS, PATTERN_INFO, DECOR_KEYS, RATIOS, SLIDE_W, PALETTES, BG_COLORS, FONTS, fontStack } from "./core";
 import { Ic, Seg, Stepper, IconBtn, PaletteSwatches, PatternTile, PatternDiagram, Popover } from "./icons";
 import { StripContent } from "./strip";
 
@@ -575,13 +575,22 @@ export function InspGroup({ label, children }: any) {
 /* ============ BOTTOM SLIDE STRIP ============ */
 
 function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H, active,
-  locked, onSelectPost, onToggleLock, onPickLayout }: any) {
+  locked, slideBg, onSelectPost, onToggleLock, onPickLayout, onPickBg }: any) {
   // popover position is fixed — the bottom strip scrolls horizontally, so an
   // absolutely-positioned popover would be clipped by the scroll container
   const [pickAt, setPickAt] = React.useState<{ x: number; y: number } | null>(null);
   const pickOpen = pickAt !== null;
   const setPickOpen = (o: boolean) => setPickAt(o ? pickAt : null);
+  const [bgAt, setBgAt] = React.useState<{ x: number; y: number } | null>(null);
+  const bgOpen = bgAt !== null;
+  const curBg = (slideBg && slideBg[i]) || null;
   const singles = Object.keys(PATTERNS).filter(t => PATTERNS[t].span === 1);
+  const openPop = (e: React.MouseEvent, cur: any, set: (v: any) => void) => {
+    e.stopPropagation();
+    if (cur) { set(null); return; }
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    set({ x: r.left + r.width / 2, y: r.top - 8 });
+  };
   return (
     <span className={"ssThumbWrap" + (locked ? " locked" : "")}>
       <button type="button"
@@ -590,7 +599,7 @@ function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H
         <span className="ssClip" style={{ width: slideW, height: H }}>
           <span className="ssInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
             <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-              texture={texture} texts={texts} s={s} api={{ ...api, interactive: false }} />
+              texture={texture} texts={texts} s={s} slideBg={slideBg} api={{ ...api, interactive: false }} />
           </span>
         </span>
         <em className="ssNum">{i + 1}</em>
@@ -603,13 +612,13 @@ function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H
         </button>
         <button type="button" className={"ssTool popTrigger" + (pickOpen ? " on" : "")}
           title="Choose this post's layout"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (pickOpen) { setPickAt(null); return; }
-            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            setPickAt({ x: r.left + r.width / 2, y: r.top - 8 });
-          }}>
+          onClick={(e) => openPop(e, pickOpen, (v) => setPickAt(v))}>
           {Ic.layouts}
+        </button>
+        <button type="button" className={"ssTool popTrigger ssBgTool" + (bgOpen ? " on" : "") + (curBg ? " set" : "")}
+          title="Background color for this post"
+          onClick={(e) => openPop(e, bgOpen, (v) => setBgAt(v))}>
+          <span className="ssBgDot" style={curBg ? { background: curBg } : undefined}></span>
         </button>
       </span>
       <Popover open={pickOpen} onClose={() => setPickOpen(false)} className="layoutPop"
@@ -630,12 +639,39 @@ function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H
           ))}
         </div>
       </Popover>
+      <Popover open={bgOpen} onClose={() => setBgAt(null)} className="bgPop"
+        style={bgAt ? {
+          position: "fixed", left: bgAt.x, top: bgAt.y,
+          bottom: "auto", transform: "translate(-50%, -100%)",
+        } : undefined}>
+        <span className="layoutPopHd">Post {i + 1} background</span>
+        <div className="bgPopGrid">
+          <button type="button" className={"bgPick bgPickDefault" + (!curBg ? " on" : "")}
+            title="Use the carousel background" onClick={() => { setBgAt(null); onPickBg(i, null); }}>
+            <span className="bgPickSw"></span><span>Default</span>
+          </button>
+          {BG_COLORS.map((c: any) => (
+            <button key={c.bg} type="button"
+              className={"bgPick" + (curBg === c.bg ? " on" : "")} title={c.name}
+              onClick={() => { setBgAt(null); onPickBg(i, c.bg); }}>
+              <span className="bgPickSw" style={{ background: c.bg }}></span>
+              <span>{c.name}</span>
+            </button>
+          ))}
+          <label className="bgPick bgPickCustom" title="Custom color">
+            <span className="bgPickSw" style={curBg && !BG_COLORS.some((c: any) => c.bg === curBg) ? { background: curBg } : undefined}>+</span>
+            <span>Custom</span>
+            <input type="color" value={curBg || "#ffffff"}
+              onChange={(e) => onPickBg(i, e.target.value)} />
+          </label>
+        </div>
+      </Popover>
     </span>
   );
 }
 
 export function BottomStrip({ tpl, palette, bgStyle, texture, texts, api, activePost, onSelectPost,
-  onAddPost, n, locks = [], onToggleLock, onPickLayout }: any) {
+  onAddPost, n, locks = [], slideBg = [], onToggleLock, onPickLayout, onPickBg }: any) {
   const H = 60;
   const s = H / tpl.H;
   const slideW = SLIDE_W * s;
@@ -648,8 +684,9 @@ export function BottomStrip({ tpl, palette, bgStyle, texture, texts, api, active
             {i > 0 && <span className="ssLink" title="Seamless boundary">{Ic.link}</span>}
             <PostThumb tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
               texts={texts} api={api} i={i} s={s} slideW={slideW} H={H}
-              active={activePost === i} locked={!!locks[i]}
-              onSelectPost={onSelectPost} onToggleLock={onToggleLock} onPickLayout={onPickLayout} />
+              active={activePost === i} locked={!!locks[i]} slideBg={slideBg}
+              onSelectPost={onSelectPost} onToggleLock={onToggleLock} onPickLayout={onPickLayout}
+              onPickBg={onPickBg} />
           </React.Fragment>
         ))}
         {n < 10 && (

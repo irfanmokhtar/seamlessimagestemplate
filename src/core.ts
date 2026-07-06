@@ -112,6 +112,11 @@ export function paletteFromBg(bg: string, name: string): Palette {
 
 export const PALETTES: Palette[] = BG_COLORS.map(c => paletteFromBg(c.bg, c.name));
 
+/* CSS background for a slide fill — flat hex, or the same 135° gradient the
+   global background uses when bgStyle is "gradient". */
+export const bgFillCss = (hex: string, gradient: boolean) =>
+  gradient ? `linear-gradient(135deg, ${shade(hex, 0.04)}, ${shade(hex, -0.06)})` : hex;
+
 export const PATTERNS: Record<string, { span: number; weight: number }> = {
   full:      { span: 1, weight: 3.0 },
   framed:    { span: 1, weight: 3.0 },

@@ -480,6 +480,7 @@ button { font-family: inherit; }
   transition: width var(--morph), height var(--morph), background 0.3s;
 }
 .stripLayer { position: absolute; inset: 0; pointer-events: none; }
+.slideBgFill { position: absolute; top: 0; pointer-events: none; transition: background 0.3s; }
 .panoBlur { position: absolute; inset: 0; overflow: hidden; }
 .panoBlur img { width: 106%; height: 106%; margin: -3%; object-fit: cover; opacity: 0.4; }
 .blurBgSlide {
@@ -855,6 +856,39 @@ button { font-family: inherit; }
 .layoutPick span {
   font: 500 8.5px "Hanken Grotesk", sans-serif; color: var(--ink-2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
+}
+
+/* per-post background color tool + picker */
+.ssBgTool .ssBgDot {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: conic-gradient(#f43f5e, #eab308, #22c55e, #3b82f6, #f43f5e);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+}
+.ssBgTool.set .ssBgDot { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35); }
+.bgPop { width: 250px; }
+.bgPopGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.bgPick {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 4px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  transition: border-color 0.14s, background 0.14s;
+}
+.bgPick:hover { border-color: var(--border-2); background: var(--surface-2); }
+.bgPick.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bgPickSw {
+  width: 100%; height: 22px; border-radius: 5px;
+  border: 1px solid var(--border-2); display: grid; place-items: center;
+  color: var(--ink-3); font: 600 13px "Hanken Grotesk", sans-serif;
+}
+.bgPickDefault .bgPickSw {
+  background: repeating-conic-gradient(var(--border) 0% 25%, transparent 0% 50%) 0 / 10px 10px;
+}
+.bgPick span:last-child {
+  font: 500 8.5px "Hanken Grotesk", sans-serif; color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.bgPickCustom input[type="color"] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer;
 }
 
 /* ============ TEXT PRESETS + INLINE EDIT ============ */

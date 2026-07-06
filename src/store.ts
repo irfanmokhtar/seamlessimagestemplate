@@ -24,6 +24,7 @@ export interface DocRecord {
   photoIds: (string | null)[];
   poolIds?: string[]; // extra uploaded photos not assigned to any slot
   locks: boolean[];
+  slideBg?: (string | null)[]; // per-slide bg color override (null = palette default)
 }
 
 const DB_NAME = "seamless";

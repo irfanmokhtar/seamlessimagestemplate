@@ -85,6 +85,7 @@ export function App() {
   const [enabled, setEnabled] = React.useState<Enabled>(
     () => ({ ...defaultEnabled(), ...(saved.enabled || {}) }));
   const [locks, setLocks] = React.useState<boolean[]>([]);
+  const [slideBg, setSlideBg] = React.useState<(string | null)[]>([]);
 
   // global defaults for new docs (theme persists separately; docs persist in IndexedDB)
   React.useEffect(() => {
@@ -159,6 +160,7 @@ export function App() {
     setTexts(Array.isArray(rec.texts) ? rec.texts : []);
     setPanzoom(rec.panzoom || {});
     setLocks(rec.locks || []);
+    setSlideBg(rec.slideBg || []);
     setPhotoIds(rec.photoIds || []);
     setPhotos(urls);
     setPool(poolUrls);
@@ -197,6 +199,7 @@ export function App() {
       photoIds: [],
       poolIds: [],
       locks: [],
+      slideBg: [],
     };
     hydrate(rec, [], []);
   };
@@ -208,7 +211,7 @@ export function App() {
     return {
       id: docId, name: docName, updatedAt: Date.now(),
       history, cursor, n, H, paletteIdx, bgStyle, texture, enabled,
-      texts, panzoom, photoIds, poolIds: pool.map(p => p.id), locks,
+      texts, panzoom, photoIds, poolIds: pool.map(p => p.id), locks, slideBg,
     };
   };
   const buildRecRef = React.useRef(buildRec);
@@ -222,7 +225,7 @@ export function App() {
     }, 800);
     return () => clearTimeout(saveTimer.current);
   }, [screen, docId, docName, history, cursor, n, H, paletteIdx, bgStyle, texture,
-    enabled, texts, panzoom, photoIds, pool, locks]);
+    enabled, texts, panzoom, photoIds, pool, locks, slideBg]);
 
   const goHome = async () => {
     const rec = buildRecRef.current();
@@ -336,7 +339,17 @@ export function App() {
   const changeN = (v: number) => {
     setN(v);
     setLocks(l => l.slice(0, v));
+    setSlideBg(b => b.slice(0, v));
     pushTemplate(resizeTemplate(tpl, v, H, enabled), true);
+  };
+
+  const pickBg = (slide: number, hex: string | null) => {
+    setSlideBg(prev => {
+      const nx = prev.slice();
+      while (nx.length < n) nx.push(null);
+      nx[slide] = hex;
+      return nx;
+    });
   };
   const changeH = (v: number) => { setH(v); regenerate(n, v, enabled); };
   const togglePattern = (k: string) => {
@@ -720,14 +733,15 @@ export function App() {
         <div className="workspace">
           <main className="canvasArea">
             <StripStage tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
-              texts={texts} viewMode={viewMode} showGuides={true}
+              texts={texts} viewMode={viewMode} showGuides={true} slideBg={slideBg}
               api={api} onStageDrop={onStageDrop} zoom={zoom}
               selected={selected} onClearSelect={() => { setSelected(null); setSelText(null); }} />
           </main>
           <BottomStrip tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
             texts={texts} api={api} activePost={activePost} onSelectPost={selectPost}
             onAddPost={addPost} n={n}
-            locks={locks} onToggleLock={toggleLock} onPickLayout={pickLayout} />
+            locks={locks} slideBg={slideBg} onToggleLock={toggleLock}
+            onPickLayout={pickLayout} onPickBg={pickBg} />
         </div>
 
         <Inspector selected={selected} tpl={tpl} photos={photos} panzoom={panzoom}
@@ -742,7 +756,7 @@ export function App() {
 
       <ExportModal open={exportOpen} onClose={() => setExportOpen(false)}
         tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} texts={texts} api={api}
-        docName={docName}
+        docName={docName} slideBg={slideBg}
         onConfirm={(msg: string) => {
           setExportOpen(false);
           showToast(msg);

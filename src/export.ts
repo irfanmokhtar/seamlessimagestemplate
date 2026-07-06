@@ -18,6 +18,7 @@ export interface ExportOpts {
   photos: (string | null)[];
   panzoom: Record<number, Panzoom>;
   images: Map<string, HTMLImageElement>;
+  slideBg?: (string | null)[]; // per-slide bg color override
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -216,6 +217,24 @@ export function drawStrip(
     c.fillStyle = p.bg;
   }
   c.fillRect(0, 0, stripW * s, T.H * s);
+
+  // per-slide background color overrides
+  if (o.slideBg) {
+    for (let i = 0; i < T.n; i++) {
+      const hex = o.slideBg[i];
+      if (!hex) continue;
+      const x = i * SLIDE_W;
+      if (o.bgStyle === "gradient") {
+        const g = c.createLinearGradient(x * s, 0, (x + SLIDE_W) * s, T.H * s);
+        g.addColorStop(0, shade(hex, 0.04));
+        g.addColorStop(1, shade(hex, -0.06));
+        c.fillStyle = g;
+      } else {
+        c.fillStyle = hex;
+      }
+      c.fillRect(x * s, 0, SLIDE_W * s, T.H * s);
+    }
+  }
 
   if (o.bgStyle === "blurpano") {
     const firstSrc = o.photos.find(Boolean) as string | undefined;

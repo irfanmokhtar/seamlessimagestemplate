@@ -8,7 +8,7 @@ import { exportCarousel } from "./export";
 import { InspGroup } from "./panels";
 
 export function ExportModal({ open, onClose, tpl, palette, bgStyle, texture, texts, api,
-  docName, onConfirm }: any) {
+  docName, onConfirm, slideBg }: any) {
   const [busy, setBusy] = React.useState(false);
   const [format, setFormat] = React.useState<"png" | "jpeg">("png");
   const [scale, setScale] = React.useState<1 | 2>(1);
@@ -22,7 +22,7 @@ export function ExportModal({ open, onClose, tpl, palette, bgStyle, texture, tex
     setBusy(true);
     try {
       await exportCarousel(
-        { tpl, palette, bgStyle, texture, texts, photos: api.photos, panzoom: api.panzoom },
+        { tpl, palette, bgStyle, texture, texts, photos: api.photos, panzoom: api.panzoom, slideBg },
         { format, scale, mode, docName, separate },
       );
       onConfirm(mode === "pano"
@@ -53,7 +53,7 @@ export function ExportModal({ open, onClose, tpl, palette, bgStyle, texture, tex
               <div className="exportClip" style={{ width: slideW, height: tpl.H * s }}>
                 <div style={{ transform: `translateX(${-i * slideW}px)` }}>
                   <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                    texture={texture} texts={texts} s={s}
+                    texture={texture} texts={texts} s={s} slideBg={slideBg}
                     api={{ ...api, interactive: false }} />
                 </div>
               </div>

@@ -6,7 +6,7 @@
    transition — the seamless concept, demonstrated by the UI itself. */
 
 import React from "react";
-import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover, fontStack } from "./core";
+import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover, fontStack, bgFillCss } from "./core";
 import type { Box, Palette, Panzoom, StripApi, TextBlock } from "./types";
 
 const GRAIN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -322,7 +322,7 @@ function TextItem({ t, s, vs, palette, api }: {
 
 /* ---------- full strip content (one copy per slide window) ---------- */
 
-export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, selected }: any) {
+export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, selected, slideBg }: any) {
   const stripW = tpl.n * SLIDE_W * s;
   const H = tpl.H * s;
   const p: Palette = palette;
@@ -338,6 +338,18 @@ export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, se
 
   return (
     <div className="stripContent" style={{ width: stripW, height: H, background: bg }}>
+
+      {/* per-slide background color overrides (painted over the global bg,
+          under everything else) */}
+      {Array.from({ length: tpl.n }, (_, i) => {
+        const hex = slideBg && slideBg[i];
+        return hex ? (
+          <div key={"sbg" + i} className="slideBgFill" style={{
+            left: i * SLIDE_W * s, width: SLIDE_W * s, height: H,
+            background: bgFillCss(hex, bgStyle === "gradient"),
+          }}></div>
+        ) : null;
+      })}
 
       {bgStyle === "blurpano" && firstSrc && (
         <div className="panoBlur">
@@ -421,7 +433,7 @@ export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, se
 
 /* ---------- strip stage: slide windows that pull apart ---------- */
 
-export function StripStage({ tpl, palette, bgStyle, texture, texts, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect }: any) {
+export function StripStage({ tpl, palette, bgStyle, texture, texts, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect, slideBg }: any) {
   const wrapRef = React.useRef<HTMLDivElement>(null);
   const [avail, setAvail] = React.useState({ w: 1200, h: 600 });
 
@@ -463,7 +475,7 @@ export function StripStage({ tpl, palette, bgStyle, texture, texts, viewMode, sh
               style={{ left: i * (slideW + gap), width: slideW, height: tpl.H * s }}>
               <div className="slideInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
                 <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                  texture={texture} texts={texts} s={s} api={api} selected={selected} />
+                  texture={texture} texts={texts} s={s} api={api} selected={selected} slideBg={slideBg} />
               </div>
               {showGuides && !posts && i > 0 && <div className="boundaryGuide"></div>}
               <div className="slideChip">{i + 1}</div>
