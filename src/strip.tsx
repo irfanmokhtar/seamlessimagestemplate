@@ -6,8 +6,9 @@
    transition — the seamless concept, demonstrated by the UI itself. */
 
 import React from "react";
-import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover, fontStack, bgFillCss } from "./core";
-import type { Box, Palette, Panzoom, StripApi, TextBlock } from "./types";
+import { SLIDE_W, PATTERN_INFO, rgba, shade, luminance, rotCover, fontStack, bgFillCss,
+  VIGNETTE_INNER, GRADIENT_TOP, vignetteAlpha, gradientAlpha, effectAt } from "./core";
+import type { Box, Palette, Panzoom, StripApi, TextBlock, Effects } from "./types";
 
 const GRAIN_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\")";
 const PAPER_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.04 0.09' numOctaves='3'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23p)'/%3E%3C/svg%3E\")";
@@ -212,6 +213,10 @@ function PhotoBox({ box, index, s, palette, api, selected }: {
       {over && <div className="dropRing"></div>}
       {selected && api.interactive && (
         <div className="selRing">
+          {(["t", "b", "l", "r"] as const).map(c => (
+            <i key={c} className={"selE " + c}
+              onPointerDown={startResize(c)} onPointerMove={onPointerMove} onPointerUp={onPointerUp}></i>
+          ))}
           {(["tl", "tr", "bl", "br"] as const).map(c => (
             <i key={c} className={"selH " + c}
               onPointerDown={startResize(c)} onPointerMove={onPointerMove} onPointerUp={onPointerUp}></i>
@@ -322,7 +327,7 @@ function TextItem({ t, s, vs, palette, api }: {
 
 /* ---------- full strip content (one copy per slide window) ---------- */
 
-export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, selected, slideBg }: any) {
+export function StripContent({ tpl, palette, bgStyle, texture, slideEffects, texts, s, api, selected, slideBg }: any) {
   const stripW = tpl.n * SLIDE_W * s;
   const H = tpl.H * s;
   const p: Palette = palette;
@@ -409,9 +414,35 @@ export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, se
 
       {/* photo slots */}
       {tpl.boxes.map((b: Box, i: number) => (
-        <PhotoBox key={i} box={b} index={i} s={s} palette={p} api={api}
+        <PhotoBox key={b.id} box={b} index={i} s={s} palette={p} api={api}
           selected={selected === i} />
       ))}
+
+      {/* effects — painted over photos, under text so captions stay legible.
+          each post carries its own vignette + gradient intensity (slideEffects),
+          so effects can be applied to individual strips. */}
+      {Array.from({ length: tpl.n }, (_, i) => {
+        const fx: Effects = effectAt(slideEffects, i);
+        if (fx.gradient <= 0 && fx.vignette <= 0) return null;
+        return (
+          <React.Fragment key={"fx" + i}>
+            {fx.gradient > 0 && (
+              <div className="fxOverlay" style={{
+                left: i * SLIDE_W * s, width: SLIDE_W * s,
+                background: `linear-gradient(to bottom, rgba(0,0,0,0) ${GRADIENT_TOP * 100}%, `
+                  + `rgba(0,0,0,${gradientAlpha(fx.gradient).toFixed(3)}) 100%)`,
+              }}></div>
+            )}
+            {fx.vignette > 0 && (
+              <div className="fxOverlay" style={{
+                left: i * SLIDE_W * s, width: SLIDE_W * s,
+                background: `radial-gradient(circle at center, rgba(0,0,0,0) ${VIGNETTE_INNER * 100}%, `
+                  + `rgba(0,0,0,${vignetteAlpha(fx.vignette).toFixed(3)}) 100%)`,
+              }}></div>
+            )}
+          </React.Fragment>
+        );
+      })}
 
       {/* text blocks */}
       {(texts || []).map((t: TextBlock) => (
@@ -433,7 +464,7 @@ export function StripContent({ tpl, palette, bgStyle, texture, texts, s, api, se
 
 /* ---------- strip stage: slide windows that pull apart ---------- */
 
-export function StripStage({ tpl, palette, bgStyle, texture, texts, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect, slideBg }: any) {
+export function StripStage({ tpl, palette, bgStyle, texture, slideEffects, texts, viewMode, showGuides, api, onStageDrop, zoom = 1, selected, onClearSelect, slideBg }: any) {
   const wrapRef = React.useRef<HTMLDivElement>(null);
   const [avail, setAvail] = React.useState({ w: 1200, h: 600 });
 
@@ -475,7 +506,7 @@ export function StripStage({ tpl, palette, bgStyle, texture, texts, viewMode, sh
               style={{ left: i * (slideW + gap), width: slideW, height: tpl.H * s }}>
               <div className="slideInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
                 <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-                  texture={texture} texts={texts} s={s} api={api} selected={selected} slideBg={slideBg} />
+                  texture={texture} slideEffects={slideEffects} texts={texts} s={s} api={api} selected={selected} slideBg={slideBg} />
               </div>
               {showGuides && !posts && i > 0 && <div className="boundaryGuide"></div>}
               <div className="slideChip">{i + 1}</div>

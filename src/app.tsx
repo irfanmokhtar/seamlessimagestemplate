@@ -4,8 +4,8 @@
 import React from "react";
 import {
   PATTERNS, DECOR_KEYS, PALETTES, SLIDE_W, generateTemplate, resizeTemplate,
-  shuffleTemplate, setSlideLayout, addSlot, removeSlot, newTextBlock,
-  encodeLook, decodeLook, newSeed,
+  shuffleTemplate, setSlideLayout, moveSlide, addSlot, removeSlot, newTextBlock,
+  encodeLook, decodeLook, newSeed, NO_EFFECT, paletteForBg, resolveBgColor,
 } from "./core";
 import { clampPan } from "./strip";
 import { StripStage } from "./strip";
@@ -15,7 +15,7 @@ import { Gallery } from "./gallery";
 import {
   DocRecord, putDoc, getAllDocs, deleteDoc, newId, putPhoto, loadPhotoUrls, gcPhotos,
 } from "./store";
-import type { Box, Enabled, BgStyle, Texture, ViewMode, TextBlock, Template } from "./types";
+import type { Box, Enabled, BgStyle, Texture, Effects, ViewMode, TextBlock, Template } from "./types";
 
 const ALL_KEYS = [...Object.keys(PATTERNS), ...DECOR_KEYS];
 // ribbon + circles decor start off — they read as busy on a fresh canvas
@@ -76,11 +76,12 @@ export function App() {
   const [docName, setDocName] = React.useState("Untitled carousel");
   const [n, setN] = React.useState(5);
   const [H, setH] = React.useState(1350);
-  const [paletteIdx, setPaletteIdx] = React.useState<number>(
-    () => (Number.isInteger(saved.paletteIdx) && PALETTES[saved.paletteIdx]) ? saved.paletteIdx : 0);
+  const [bgColor, setBgColor] = React.useState<string>(() => resolveBgColor(saved));
   const [bgStyle, setBgStyle] = React.useState<BgStyle>(
     () => saved.bgStyle === "white" ? "flat" : (saved.bgStyle || "flat"));
   const [texture, setTexture] = React.useState<Texture>(() => saved.texture || "grain");
+  // per-post photographic effects (index = slide); sparse — missing = no effect
+  const [slideEffects, setSlideEffects] = React.useState<Effects[]>([]);
   const [texts, setTexts] = React.useState<TextBlock[]>([]);
   const [enabled, setEnabled] = React.useState<Enabled>(
     () => ({ ...defaultEnabled(), ...(saved.enabled || {}) }));
@@ -89,8 +90,8 @@ export function App() {
 
   // global defaults for new docs (theme persists separately; docs persist in IndexedDB)
   React.useEffect(() => {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ enabled, bgStyle, texture, paletteIdx }));
-  }, [enabled, bgStyle, texture, paletteIdx]);
+    localStorage.setItem(STORE_KEY, JSON.stringify({ enabled, bgStyle, texture, bgColor }));
+  }, [enabled, bgStyle, texture, bgColor]);
 
   const [history, setHistory] = React.useState<Template[]>(
     () => [generateTemplate(5, 1350, { ...defaultEnabled(), ...(saved.enabled || {}) })]);
@@ -102,12 +103,19 @@ export function App() {
 
   const [photos, setPhotos] = React.useState<(string | null)[]>(() => []);
   const [photoIds, setPhotoIds] = React.useState<(string | null)[]>(() => []);
-  // pool = extra uploaded photos not assigned to any slot (reservoir for
-  // shuffle-fill + manual placement). Kept separate from the slot arrays.
+  // pool = persistent photo library: every uploaded photo lives here for the
+  // life of the doc. Placing a photo in a slot references it, never consumes
+  // it — reshuffles and layout changes can't lose an upload.
   const [pool, setPool] = React.useState<{ id: string; url: string }[]>(() => []);
   const [panzoom, setPanzoom] = React.useState<Record<number, any>>({});
   const [viewMode, setViewMode] = React.useState<ViewMode>("strip");
   const [tab, setTab] = React.useState("layouts");
+  const [leftOpen, setLeftOpen] = React.useState(true);
+  // rail click: switching tab opens the panel; clicking the active tab collapses it
+  const onTab = (id: string) => {
+    if (id === tab && leftOpen) setLeftOpen(false);
+    else { setTab(id); setLeftOpen(true); }
+  };
   const [selected, setSelected] = React.useState<number | null>(null);
   const [selText, setSelText] = React.useState<number | null>(null);
   const [zoom, setZoom] = React.useState(0.66);
@@ -153,9 +161,12 @@ export function App() {
     setCursor(Math.min(rec.cursor ?? 0, (rec.history?.length ?? 1) - 1));
     setDraft2(null);
     setN(rec.n); setH(rec.H);
-    setPaletteIdx(PALETTES[rec.paletteIdx] ? rec.paletteIdx : 0);
+    setBgColor(resolveBgColor(rec));
     setBgStyle(rec.bgStyle || "flat");
     setTexture(rec.texture || "grain");
+    // migrate docs saved with the old carousel-wide `effects` → apply to every post
+    setSlideEffects(rec.slideEffects
+      || ((rec as any).effects ? Array.from({ length: rec.n }, () => ({ ...(rec as any).effects })) : []));
     setEnabled({ ...defaultEnabled(), ...(rec.enabled || {}) });
     setTexts(Array.isArray(rec.texts) ? rec.texts : []);
     setPanzoom(rec.panzoom || {});
@@ -163,7 +174,16 @@ export function App() {
     setSlideBg(rec.slideBg || []);
     setPhotoIds(rec.photoIds || []);
     setPhotos(urls);
-    setPool(poolUrls);
+    // the pool is a persistent library of every uploaded photo — fold placed
+    // photos in too so docs saved before this convention migrate cleanly
+    setPool(() => {
+      const lib = poolUrls.slice();
+      const have = new Set(lib.map(p => p.id));
+      (rec.photoIds || []).forEach((id, i) => {
+        if (id && urls[i] && !have.has(id)) { lib.push({ id, url: urls[i] as string }); have.add(id); }
+      });
+      return lib;
+    });
     setSelected(null); setSelText(null);
     setViewMode("strip"); setTab("layouts");
     setScreen("editor");
@@ -190,9 +210,10 @@ export function App() {
       history: [tpl0],
       cursor: 0,
       n: nn, H: hh,
-      paletteIdx: look?.paletteIdx ?? paletteIdx,
+      bgColor: look ? resolveBgColor(look) : bgColor,
       bgStyle: (look?.bgStyle as BgStyle) ?? bgStyle,
       texture: (look?.texture as Texture) ?? texture,
+      slideEffects: look?.slideEffects ?? [],
       enabled: en,
       texts: look?.texts ?? [],
       panzoom: {},
@@ -210,7 +231,7 @@ export function App() {
     if (!docId) return null;
     return {
       id: docId, name: docName, updatedAt: Date.now(),
-      history, cursor, n, H, paletteIdx, bgStyle, texture, enabled,
+      history, cursor, n, H, bgColor, bgStyle, texture, slideEffects, enabled,
       texts, panzoom, photoIds, poolIds: pool.map(p => p.id), locks, slideBg,
     };
   };
@@ -224,7 +245,7 @@ export function App() {
       if (rec) putDoc(rec).catch(() => { /* quota/blocked — editor keeps working */ });
     }, 800);
     return () => clearTimeout(saveTimer.current);
-  }, [screen, docId, docName, history, cursor, n, H, paletteIdx, bgStyle, texture,
+  }, [screen, docId, docName, history, cursor, n, H, bgColor, bgStyle, texture, slideEffects,
     enabled, texts, panzoom, photoIds, pool, locks, slideBg]);
 
   const goHome = async () => {
@@ -278,17 +299,17 @@ export function App() {
         const newIds = remapArr(photoIds, map);
         const newPz: Record<number, any> = {};
         map.forEach((m, j) => { if (m >= 0 && panzoom[m]) newPz[j] = panzoom[m]; });
-        // … then fill any empty unlocked slot from the pool (random pick)
-        const bag = shuffleArr(pool);
-        const taken = new Set<string>();
+        // … then fill any empty unlocked slot from the library — unplaced
+        // photos only, and the library keeps everything it has
+        const used = new Set(newIds.filter(Boolean));
+        const bag = shuffleArr(pool.filter(e => !used.has(e.id)));
         next.boxes.forEach((b: Box, i: number) => {
           if (!newPhotos[i] && !locks[b.slide] && bag.length) {
             const e = bag.shift()!;
-            newPhotos[i] = e.url; newIds[i] = e.id; taken.add(e.id);
+            newPhotos[i] = e.url; newIds[i] = e.id;
           }
         });
         setPhotos(newPhotos); setPhotoIds(newIds); setPanzoom(newPz);
-        if (taken.size) setPool(p => p.filter(e => !taken.has(e.id)));
         pushTemplate(next, true); setSelected(null);
       } else pushTemplate(next);
     } else {
@@ -340,6 +361,7 @@ export function App() {
     setN(v);
     setLocks(l => l.slice(0, v));
     setSlideBg(b => b.slice(0, v));
+    setSlideEffects(e => e.slice(0, v));
     pushTemplate(resizeTemplate(tpl, v, H, enabled), true);
   };
 
@@ -349,6 +371,31 @@ export function App() {
       while (nx.length < n) nx.push(null);
       nx[slide] = hex;
       return nx;
+    });
+  };
+
+  /* per-post effects — set one effect's intensity on one slide */
+  const setSlideEffect = (slide: number, key: keyof Effects, val: number) => {
+    setSlideEffects(prev => {
+      const nx = prev.slice();
+      while (nx.length < n) nx.push({ ...NO_EFFECT });
+      nx[slide] = { ...(nx[slide] || NO_EFFECT), [key]: val };
+      return nx;
+    });
+  };
+  const clearSlideEffects = (slide: number) => {
+    setSlideEffects(prev => {
+      if (!prev[slide]) return prev;
+      const nx = prev.slice();
+      nx[slide] = { ...NO_EFFECT };
+      return nx;
+    });
+  };
+  // copy one post's effects onto every post
+  const applyEffectsToAll = (slide: number) => {
+    setSlideEffects(prev => {
+      const src = prev[slide] || NO_EFFECT;
+      return Array.from({ length: n }, () => ({ ...src }));
     });
   };
   const changeH = (v: number) => { setH(v); regenerate(n, v, enabled); };
@@ -373,6 +420,30 @@ export function App() {
     setSelected(null);
   };
 
+  /* ----- reorder posts (drag a bottom-strip thumb onto another) ----- */
+  const movePost = (from: number, to: number) => {
+    const res = moveSlide(tpl, from, to);
+    if (!res) return;
+    const { tpl: next, map, order } = res;
+    applyMap(map);
+    // per-slide state follows its post
+    const reorder = <T,>(arr: T[], fill: T): T[] =>
+      order.map(old => (old < arr.length ? arr[old] : fill));
+    setLocks(l => reorder(l, false));
+    setSlideBg(b => reorder(b, null));
+    setSlideEffects(e => reorder(e, { ...NO_EFFECT }));
+    // texts ride along with the slide they sit on
+    const newAt: number[] = [];
+    order.forEach((old, nw) => { newAt[old] = nw; });
+    setTexts(ts => ts.map(t => {
+      const sl = Math.max(0, Math.min(n - 1, Math.floor(t.x / SLIDE_W)));
+      const nw = newAt[sl] ?? sl;
+      return nw === sl ? t : { ...t, x: t.x + (nw - sl) * SLIDE_W };
+    }));
+    pushTemplate(next, true);
+    setSelected(null);
+  };
+
   /* ----- zoom ----- */
   const zoomStep = (dir: number) => setZoom(z => clamp(dir > 0 ? z * 1.15 : z / 1.15, 0.4, 3));
   const fitZoom = () => setZoom(1);
@@ -384,8 +455,16 @@ export function App() {
     return { id, url: URL.createObjectURL(file) };
   };
 
+  // every upload joins the library, whether or not it also lands in a slot
+  const addToPool = (entries: { id: string; url: string }[]) =>
+    setPool(p => {
+      const have = new Set(p.map(e => e.id));
+      return [...p, ...entries.filter(e => !have.has(e.id))];
+    });
+
   const setSlotPhoto = async (i: number, file: File) => {
     const { id, url } = await registerFile(file);
+    addToPool([{ id, url }]);
     setPhotos(prev => { const nx = [...prev]; nx[i] = url; return nx; });
     setPhotoIds(prev => { const nx = [...prev]; nx[i] = id; return nx; });
     setPanzoom(pz => { const nx = { ...pz }; delete nx[i]; return nx; });
@@ -393,20 +472,20 @@ export function App() {
 
   const fillEmpty = async (files: File[]) => {
     const entries = await Promise.all(files.map(registerFile));
-    // fill empty slots in order; the rest overflow into the pool
+    addToPool(entries);
+    // fill empty slots in order; the rest just wait in the library
     const emptyIdx: number[] = [];
     for (let i = 0; i < tpl.boxes.length; i++) if (!photos[i]) emptyIdx.push(i);
     const place = entries.slice(0, emptyIdx.length);
-    const overflow = entries.slice(emptyIdx.length);
     if (place.length) {
       setPhotos(prev => { const nx = [...prev]; place.forEach((e, k) => nx[emptyIdx[k]] = e.url); return nx; });
       setPhotoIds(prev => { const nx = [...prev]; place.forEach((e, k) => nx[emptyIdx[k]] = e.id); return nx; });
     }
-    if (overflow.length) setPool(p => [...p, ...overflow.map(e => ({ id: e.id, url: e.url }))]);
+    const rest = entries.length - place.length;
     const parts: string[] = [];
     if (place.length) parts.push(`${place.length} placed`);
-    if (overflow.length) parts.push(`${overflow.length} to pool`);
-    showToast(`Added ${entries.length} photo${entries.length > 1 ? "s" : ""}` +
+    if (rest > 0) parts.push(`${rest} waiting in library`);
+    showToast(`Added ${entries.length} photo${entries.length > 1 ? "s" : ""} to your library` +
       (parts.length ? ` · ${parts.join(" · ")}` : ""));
   };
 
@@ -420,19 +499,14 @@ export function App() {
     return a;
   };
 
-  // move a pool photo into a slot; any photo it displaces returns to the pool
+  // place a library photo into a slot — the library keeps it (a displaced
+  // photo is already in the library too, so nothing is lost)
   const poolToSlot = (poolIdx: number, slot: number) => {
     const p = pool[poolIdx];
     if (!p || !tpl.boxes[slot]) return;
-    const prevId = photoIds[slot], prevUrl = photos[slot];
     setPhotos(a => { const nx = [...a]; nx[slot] = p.url; return nx; });
     setPhotoIds(a => { const nx = [...a]; nx[slot] = p.id; return nx; });
     setPanzoom(pz => { const nx = { ...pz }; delete nx[slot]; return nx; });
-    setPool(cur => {
-      const nx = cur.filter((_, k) => k !== poolIdx);
-      if (prevId) nx.push({ id: prevId, url: prevUrl as string });
-      return nx;
-    });
   };
 
   // click a pool photo: drop it into the selected slot, else the first empty one
@@ -443,17 +517,61 @@ export function App() {
     poolToSlot(poolIdx, slot);
   };
 
-  const removePoolPhoto = (poolIdx: number) =>
-    setPool(p => p.filter((_, k) => k !== poolIdx));
+  // delete a photo from the library — and from any slots still showing it
+  const removePoolPhoto = (poolIdx: number) => {
+    const p = pool[poolIdx];
+    if (!p) return;
+    setPool(cur => cur.filter((_, k) => k !== poolIdx));
+    setPhotos(a => a.map((u, i) => (photoIds[i] === p.id ? null : u)));
+    setPhotoIds(a => a.map(id => (id === p.id ? null : id)));
+  };
 
-  // pull a slot's photo out into the pool, leaving the slot empty
+  // clear a slot; the photo stays in the library
   const slotToPool = (slot: number) => {
     const id = photoIds[slot], url = photos[slot];
     if (!id) return;
+    addToPool([{ id, url: url as string }]); // defensive — normally already there
     setPhotos(a => { const nx = [...a]; nx[slot] = null; return nx; });
     setPhotoIds(a => { const nx = [...a]; nx[slot] = null; return nx; });
     setPanzoom(pz => { const nx = { ...pz }; delete nx[slot]; return nx; });
-    setPool(p => [...p, { id, url: url as string }]);
+  };
+
+  /* ----- bulk photo actions (Photos tab toolbar) ----- */
+  // randomly place library (unplaced) photos into the empty slots
+  const shuffleFillSlots = () => {
+    const used = new Set(photoIds.filter(Boolean));
+    const bag = shuffleArr(pool.filter(e => !used.has(e.id)));
+    if (!bag.length) { showToast("No photos in the library to place"); return; }
+    const np = [...photos], ni = [...photoIds], filled: number[] = [];
+    tpl.boxes.forEach((_b: Box, i: number) => {
+      if (!np[i] && bag.length) { const e = bag.shift()!; np[i] = e.url; ni[i] = e.id; filled.push(i); }
+    });
+    if (!filled.length) { showToast("Every slot is already filled"); return; }
+    setPhotos(np); setPhotoIds(ni);
+    setPanzoom(pz => { const nx = { ...pz }; filled.forEach(i => delete nx[i]); return nx; });
+    showToast(`Placed ${filled.length} photo${filled.length > 1 ? "s" : ""} into slots`);
+  };
+
+  // empty every slot; photos stay in the library
+  const clearAllSlots = () => {
+    if (!photoIds.some(Boolean)) { showToast("No photos in any slot"); return; }
+    setPhotos(a => a.map(() => null));
+    setPhotoIds(a => a.map(() => null));
+    setPanzoom({});
+    setSelected(null);
+    showToast("Cleared all slots — photos are back in your library");
+  };
+
+  // delete every photo from the project (library + slots); blobs get GC'd on save
+  const deleteAllPhotos = () => {
+    if (!pool.length) { showToast("No photos to delete"); return; }
+    const count = pool.length;
+    setPool([]);
+    setPhotos(a => a.map(() => null));
+    setPhotoIds(a => a.map(() => null));
+    setPanzoom({});
+    setSelected(null);
+    showToast(`Deleted all ${count} photo${count > 1 ? "s" : ""}`);
   };
 
   const onPickerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -577,10 +695,8 @@ export function App() {
     onSlotClick: (i: number) => openPicker(i),
     onDropFile: (i: number, file: File) => { setSlotPhoto(i, file); },
     onRemove: (i: number) => {
-      setPhotos(prev => { const nx = [...prev]; nx[i] = null; return nx; });
-      setPhotoIds(prev => { const nx = [...prev]; nx[i] = null; return nx; });
-      setPanzoom(pz => { const nx = { ...pz }; delete nx[i]; return nx; });
-      showToast("Photo removed");
+      slotToPool(i);
+      showToast("Slot cleared — photo stays in your library");
     },
     onPan: (i: number, dx: number, dy: number, box: Box) => {
       setPanzoom(pz => {
@@ -653,7 +769,7 @@ export function App() {
   /* ----- share look ----- */
   const shareLook = async () => {
     const code = encodeLook({
-      seed: tpl.seed ?? newSeed(), n, H, enabled, paletteIdx, bgStyle, texture, texts,
+      seed: tpl.seed ?? newSeed(), n, H, enabled, bgColor, bgStyle, texture, slideEffects, texts,
     });
     const url = `${location.origin}${location.pathname}#look=${code}`;
     try {
@@ -682,7 +798,7 @@ export function App() {
   const addPost = () => { if (n < 10) changeN(n + 1); };
 
   /* ----- derived ----- */
-  const palette = PALETTES[paletteIdx];
+  const palette = paletteForBg(bgColor);
   const offCount = ALL_KEYS.filter(k => enabled[k] === false).length;
   const activePost = selected != null && tpl.boxes[selected] ? tpl.boxes[selected].slide : null;
 
@@ -717,36 +833,40 @@ export function App() {
         onHome={goHome} />
 
       <div className="editorBody">
-        <LeftRail tab={tab} onTab={setTab} />
-        <LeftPanel tab={tab}
+        <LeftRail tab={tab} onTab={onTab} open={leftOpen} />
+        {leftOpen && <LeftPanel tab={tab}
           enabled={enabled} onToggle={togglePattern} offCount={offCount}
           onShuffle={() => regenerate()} spinning={spinning}
           tpl={tpl} photos={photos} onAddPhotos={() => openPicker(null)}
           onSelectSlot={(i: number) => { setSelected(i); setSelText(null); }} selected={selected}
           onSwapSlots={swapSlots} onAddSlot={addSlotHere}
-          pool={pool} onUsePool={usePoolPhoto} onPoolToSlot={poolToSlot}
+          pool={pool} photoIds={photoIds} onUsePool={usePoolPhoto} onPoolToSlot={poolToSlot}
           onRemovePool={removePoolPhoto} onSlotToPool={slotToPool}
+          onShuffleFill={shuffleFillSlots} onClearSlots={clearAllSlots} onDeleteAll={deleteAllPhotos}
           texts={texts} selText={selText} onAddText={addText} onUpdateText={updateText}
           onRemoveText={removeText} onSelectText={selectText} onDuplicateText={duplicateText}
-          panzoom={panzoom} onStraighten={onStraighten} onFitPhoto={onFitPhoto} />
+          slideEffects={slideEffects} onSlideEffect={setSlideEffect}
+          onClearSlideEffects={clearSlideEffects} onApplyEffectsToAll={applyEffectsToAll}
+          activePost={activePost} n={n}
+          panzoom={panzoom} onStraighten={onStraighten} onFitPhoto={onFitPhoto} />}
 
         <div className="workspace">
           <main className="canvasArea">
-            <StripStage tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
+            <StripStage tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} slideEffects={slideEffects}
               texts={texts} viewMode={viewMode} showGuides={true} slideBg={slideBg}
               api={api} onStageDrop={onStageDrop} zoom={zoom}
               selected={selected} onClearSelect={() => { setSelected(null); setSelText(null); }} />
           </main>
-          <BottomStrip tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
+          <BottomStrip tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} slideEffects={slideEffects}
             texts={texts} api={api} activePost={activePost} onSelectPost={selectPost}
             onAddPost={addPost} n={n}
             locks={locks} slideBg={slideBg} onToggleLock={toggleLock}
-            onPickLayout={pickLayout} onPickBg={pickBg} />
+            onPickLayout={pickLayout} onPickBg={pickBg} onMovePost={movePost} />
         </div>
 
         <Inspector selected={selected} tpl={tpl} photos={photos} panzoom={panzoom}
-          paletteIdx={paletteIdx} n={n} H={H} bgStyle={bgStyle} texture={texture}
-          onPalette={setPaletteIdx} onN={changeN} onH={changeH}
+          bgColor={bgColor} n={n} H={H} bgStyle={bgStyle} texture={texture}
+          onBgColor={setBgColor} onN={changeN} onH={changeH}
           onBgStyle={setBgStyle} onTexture={setTexture}
           onReplace={openPicker} onRemove={api.onRemove}
           onZoomTo={onZoomTo} onNudge={onNudge} onFitPhoto={onFitPhoto}
@@ -755,7 +875,7 @@ export function App() {
       </div>
 
       <ExportModal open={exportOpen} onClose={() => setExportOpen(false)}
-        tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} texts={texts} api={api}
+        tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} slideEffects={slideEffects} texts={texts} api={api}
         docName={docName} slideBg={slideBg}
         onConfirm={(msg: string) => {
           setExportOpen(false);

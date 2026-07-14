@@ -1,7 +1,7 @@
 /* gallery.tsx — project home screen: one card per saved carousel. */
 
 import React from "react";
-import { PALETTES } from "./core";
+import { paletteForBg, resolveBgColor } from "./core";
 import { Ic, IconBtn } from "./icons";
 import { TemplateThumb } from "./strip";
 import type { DocRecord } from "./store";
@@ -51,7 +51,7 @@ export function Gallery({ docs, theme, onTheme, onOpen, onNew, onDelete, onDupli
           </button>
           {docs.map(d => {
             const tpl = d.history?.[d.cursor];
-            const pal = PALETTES[d.paletteIdx] || PALETTES[0];
+            const pal = paletteForBg(resolveBgColor(d));
             return (
               <div key={d.id} className="galCard" role="button" tabIndex={0}
                 onClick={() => onOpen(d)}

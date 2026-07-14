@@ -327,6 +327,10 @@ button { font-family: inherit; }
 }
 .poolItem:hover .trayX { opacity: 1; }
 .trayX:hover { background: var(--danger, #e4572e); }
+.poolEmpty {
+  grid-column: 1 / -1; padding: 10px 6px;
+  font-size: 11.5px; color: var(--ink-3); text-align: center;
+}
 
 /* text section + faux controls */
 .field { display: flex; flex-direction: column; gap: 6px; }
@@ -533,6 +537,14 @@ button { font-family: inherit; }
 .selH.tr { right: -4px; top: -4px; }
 .selH.bl { left: -4px; bottom: -4px; }
 .selH.br { right: -4px; bottom: -4px; }
+.selE {
+  position: absolute; border-radius: 2px;
+  background: var(--surface); border: 1.5px solid var(--accent);
+}
+.selE.t { top: -4px; left: 50%; transform: translateX(-50%); width: 16px; height: 8px; }
+.selE.b { bottom: -4px; left: 50%; transform: translateX(-50%); width: 16px; height: 8px; }
+.selE.l { left: -4px; top: 50%; transform: translateY(-50%); width: 8px; height: 16px; }
+.selE.r { right: -4px; top: 50%; transform: translateY(-50%); width: 8px; height: 16px; }
 
 .textBlock { outline: none; }
 .textBlock.selected {
@@ -544,6 +556,35 @@ button { font-family: inherit; }
   position: absolute; inset: 0; z-index: 25;
   mix-blend-mode: overlay; pointer-events: none; background-repeat: repeat;
 }
+
+/* photographic effect overlays (vignette / gradient) — over photos, under
+   text + texture. Full-width by default; vignette sets left/width per slide. */
+.fxOverlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 22; pointer-events: none;
+}
+
+/* Effects panel: label row with a toggle pill + live percentage */
+.fxHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fxPct { font-style: normal; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* Effects panel: which-post selector */
+.fxPostPick { display: flex; flex-wrap: wrap; gap: 6px; }
+.fxPostChip {
+  position: relative; min-width: 30px; height: 30px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-2); color: var(--ink-2);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-variant-numeric: tabular-nums; transition: border-color 0.12s, background 0.12s;
+}
+.fxPostChip:hover { border-color: var(--accent); }
+.fxPostChip.on { border-color: var(--accent); background: var(--accent); color: #fff; }
+/* dot marks posts that already carry an effect */
+.fxPostChip.has::after {
+  content: ""; position: absolute; top: 3px; right: 3px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+}
+.fxPostChip.on.has::after { background: #fff; }
 
 /* ============ BOTTOM SLIDE STRIP ============ */
 .slideStrip {
@@ -558,7 +599,7 @@ button { font-family: inherit; }
 }
 .ssScroll {
   display: flex; align-items: center; gap: 6px; overflow-x: auto;
-  height: 100%; padding: 16px 0;
+  height: 100%; padding: 16px 0 16px 16px;
 }
 .ssScroll::-webkit-scrollbar { height: 6px; }
 .ssScroll::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
@@ -670,6 +711,16 @@ button { font-family: inherit; }
 }
 .miniBtn:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
 .miniBtn:disabled { opacity: 0.4; cursor: default; }
+/* Photos-tab bulk action toolbar */
+.photoActions { display: flex; gap: 7px; margin: 8px 0 2px; }
+.photoActions .miniBtn { flex: 1; justify-content: center; align-self: auto; }
+/* Delete-all in the library header */
+.poolClearBtn {
+  margin-left: auto; gap: 4px; padding: 2px 4px;
+  text-transform: none; letter-spacing: 0; font-size: 10.5px; font-weight: 600;
+}
+.poolClearBtn svg { width: 13px; height: 13px; }
+.poolClearBtn:hover:not(:disabled) { color: var(--danger, #e4572e); }
 
 .nudgePad {
   display: grid; grid-template-columns: repeat(3, 30px); grid-template-rows: repeat(3, 30px);
@@ -703,23 +754,35 @@ button { font-family: inherit; }
 .soonRow span { flex: 1; color: var(--ink-2); }
 .soonRow > svg:last-child { width: 12px; height: 12px; color: var(--ink-3); }
 
-/* ============ PALETTE SWATCHES ============ */
-.palSwatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-.palSw {
-  display: flex; flex-direction: column; gap: 4px; align-items: center;
-  padding: 4px 2px 5px; cursor: pointer;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  transition: border-color 0.14s, box-shadow 0.14s;
+/* ============ BACKGROUND COLOR PICKER ============ */
+.bgColorPicker { display: flex; flex-direction: column; gap: 8px; }
+.bgColorWell {
+  position: relative; display: block; height: 34px; border-radius: 8px;
+  cursor: pointer; box-shadow: inset 0 0 0 1px rgba(128,128,128,0.3);
+  transition: box-shadow 0.14s; overflow: hidden;
 }
-.palSw:hover { border-color: var(--border-2); }
-.palSw.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.palSwBg { display: block; width: 100%; height: 22px; border-radius: 5px;
-  box-shadow: inset 0 0 0 1px rgba(128,128,128,0.25); }
-.palSw small {
-  font-size: 8px; color: var(--ink-3); max-width: 100%;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.bgColorWell:hover { box-shadow: inset 0 0 0 1px var(--border-2), 0 0 0 1px var(--border-2); }
+/* native color input fills the well but stays invisible — the well shows the color */
+.bgColorWell input[type="color"] {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; border: none; padding: 0;
 }
-.palSw.on small { color: var(--ink); }
+.bgColorHex {
+  width: 100%; box-sizing: border-box; padding: 6px 8px;
+  font: 12px var(--mono, ui-monospace, monospace); letter-spacing: 0.02em;
+  text-transform: uppercase; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
+  outline: none; transition: border-color 0.14s, box-shadow 0.14s;
+}
+.bgColorHex:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bgColorPresets { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.bgColorChip {
+  height: 20px; border-radius: 5px; cursor: pointer; padding: 0;
+  border: none; box-shadow: inset 0 0 0 1px rgba(128,128,128,0.25);
+  transition: box-shadow 0.13s, transform 0.13s;
+}
+.bgColorChip:hover { transform: scale(1.08); box-shadow: inset 0 0 0 1px var(--border-2); }
+.bgColorChip.on { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent); }
 
 /* ============ MODAL ============ */
 .modalOverlay {
@@ -805,14 +868,34 @@ button { font-family: inherit; }
 
 /* ============ SLOT EDIT HANDLES ============ */
 .selRing { pointer-events: none; }
-.selH { pointer-events: auto; }
+.selH, .selE { pointer-events: auto; }
 .photoBox.selected .selH.tl { cursor: nwse-resize; }
 .photoBox.selected .selH.br { cursor: nwse-resize; }
 .photoBox.selected .selH.tr { cursor: nesw-resize; }
 .photoBox.selected .selH.bl { cursor: nesw-resize; }
+.photoBox.selected .selE.t { cursor: ns-resize; }
+.photoBox.selected .selE.b { cursor: ns-resize; }
+.photoBox.selected .selE.l { cursor: ew-resize; }
+.photoBox.selected .selE.r { cursor: ew-resize; }
 
 /* ============ BOTTOM STRIP: LOCK + LAYOUT PICKER ============ */
 .ssThumbWrap { position: relative; flex: none; display: inline-flex; }
+/* drag-reorder insertion indicator */
+.ssThumbWrap.drop-before::before, .ssThumbWrap.drop-after::after {
+  content: ""; position: absolute; top: -4px; bottom: -4px; width: 3px;
+  background: var(--accent); border-radius: 2px; pointer-events: none; z-index: 6;
+}
+.ssThumbWrap.drop-before::before { left: -12px; }
+.ssThumbWrap.drop-after::after { right: -12px; }
+/* drag-ghost card (rendered offscreen, used via setDragImage) */
+.ssDragGhost {
+  position: absolute; top: -1000px; left: -1000px;
+  width: 48px; height: 60px;
+  display: grid; place-items: center;
+  background: var(--surface); border: 2px solid var(--accent); border-radius: 6px;
+  font: 700 18px "Hanken Grotesk", sans-serif; color: var(--accent);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
 .ssTools {
   position: absolute; top: -9px; right: -4px; z-index: 5;
   display: flex; gap: 3px; opacity: 0; transition: opacity 0.15s;
@@ -844,6 +927,7 @@ button { font-family: inherit; }
   text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3);
   padding: 2px 2px 8px;
 }
+.layoutPopSub { padding-top: 10px; }
 .layoutPopGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .layoutPick {
   display: flex; flex-direction: column; gap: 4px; padding: 5px; cursor: pointer;

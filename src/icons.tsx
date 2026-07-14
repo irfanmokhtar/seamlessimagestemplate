@@ -2,7 +2,7 @@
    Figma-flavoured chrome: precise, neutral, tactile. */
 
 import React from "react";
-import { PATTERN_INFO, PALETTES } from "./core";
+import { PATTERN_INFO, BG_COLORS } from "./core";
 
 const S = (p: Record<string, unknown> = {}) => ({
   fill: "none", stroke: "currentColor", strokeWidth: 1.5,
@@ -95,18 +95,39 @@ export function Popover({ open, onClose, children, className, style }: any) {
   return <div className={"popover " + (className || "")} style={style}>{children}</div>;
 }
 
-/* ---------- palette swatches (inspector) ---------- */
-export function PaletteSwatches({ paletteIdx, onChange }: any) {
+/* ---------- background color picker (inspector) ---------- */
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+export function BgColorPicker({ value, onChange }: any) {
+  const cur = HEX_RE.test(value || "") ? value : "#FFFFFF";
+  // local text buffer so partial/invalid typing doesn't fight the canvas
+  const [txt, setTxt] = React.useState(cur);
+  React.useEffect(() => { setTxt(cur); }, [cur]);
+  const commit = (v: string) => {
+    let h = v.trim();
+    if (h && h[0] !== "#") h = "#" + h;
+    if (HEX_RE.test(h)) onChange(h.toUpperCase());
+    else setTxt(cur); // revert bad input
+  };
   return (
-    <div className="palSwatches">
-      {PALETTES.map((pal, i) => (
-        <button key={pal.name} type="button" title={pal.name}
-          className={"palSw" + (i === paletteIdx ? " on" : "")}
-          onClick={() => onChange(i)}>
-          <span className="palSwBg" style={{ background: pal.bg }}></span>
-          <small>{pal.name}</small>
-        </button>
-      ))}
+    <div className="bgColorPicker">
+      <label className="bgColorWell" title="Pick a background color"
+        style={{ background: cur }}>
+        <input type="color" value={cur}
+          onChange={(e) => onChange(e.target.value.toUpperCase())} />
+      </label>
+      <input className="bgColorHex" type="text" value={txt} spellCheck={false}
+        aria-label="Background color hex" maxLength={7}
+        onChange={(e) => setTxt(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+      <div className="bgColorPresets">
+        {BG_COLORS.map((c) => (
+          <button key={c.bg} type="button" title={c.name}
+            className={"bgColorChip" + (cur.toLowerCase() === c.bg.toLowerCase() ? " on" : "")}
+            style={{ background: c.bg }}
+            onClick={() => onChange(c.bg.toUpperCase())} />
+        ))}
+      </div>
     </div>
   );
 }

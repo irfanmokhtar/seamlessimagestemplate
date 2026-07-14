@@ -6,14 +6,16 @@
    HTMLImageElements, so loadImages() resolves them before drawing. */
 
 import { zipSync } from "fflate";
-import { SLIDE_W, rgba, shade, rand, randInt, luminance, rotCover, fontStack, fontShorthand } from "./core";
-import type { Box, Template, Palette, Panzoom, BgStyle, Texture, TextBlock } from "./types";
+import { SLIDE_W, rgba, shade, rand, randInt, luminance, rotCover, fontStack, fontShorthand,
+  VIGNETTE_INNER, GRADIENT_TOP, vignetteAlpha, gradientAlpha, effectAt } from "./core";
+import type { Box, Template, Palette, Panzoom, BgStyle, Texture, Effects, TextBlock } from "./types";
 
 export interface ExportOpts {
   tpl: Template;
   palette: Palette;
   bgStyle: BgStyle;
   texture: Texture;
+  slideEffects?: Effects[]; // per-post effect intensities (index = slide)
   texts: TextBlock[];
   photos: (string | null)[];
   panzoom: Record<number, Panzoom>;
@@ -299,6 +301,29 @@ export function drawStrip(
     if (imgAt(o, i)) drawCover(c, o, box, i, s);
     else drawPlaceholder(c, o, box, s, i + 1);
   });
+
+  // effects — over photos, under text (mirrors strip.tsx). Per-slide: each post
+  // carries its own gradient + vignette intensity (o.slideEffects[i]).
+  const rad = Math.hypot(SLIDE_W / 2, T.H / 2);
+  for (let i = 0; i < T.n; i++) {
+    const fx = effectAt(o.slideEffects, i);
+    const x = i * SLIDE_W;
+    if (fx.gradient > 0) {
+      const g = c.createLinearGradient(0, GRADIENT_TOP * T.H * s, 0, T.H * s);
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, `rgba(0,0,0,${gradientAlpha(fx.gradient)})`);
+      c.fillStyle = g;
+      c.fillRect(x * s, 0, SLIDE_W * s, T.H * s);
+    }
+    if (fx.vignette > 0) {
+      const cx = (i + 0.5) * SLIDE_W, cy = T.H / 2;
+      const g = c.createRadialGradient(cx * s, cy * s, VIGNETTE_INNER * rad * s, cx * s, cy * s, rad * s);
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, `rgba(0,0,0,${vignetteAlpha(fx.vignette)})`);
+      c.fillStyle = g;
+      c.fillRect(x * s, 0, SLIDE_W * s, T.H * s);
+    }
+  }
 
   // text blocks
   const vs = T.H / 1350;

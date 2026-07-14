@@ -2,8 +2,8 @@
    right contextual inspector, bottom slide strip. */
 
 import React from "react";
-import { PATTERNS, PATTERN_INFO, DECOR_KEYS, RATIOS, SLIDE_W, PALETTES, BG_COLORS, FONTS, fontStack } from "./core";
-import { Ic, Seg, Stepper, IconBtn, PaletteSwatches, PatternTile, PatternDiagram, Popover } from "./icons";
+import { PATTERNS, PATTERN_INFO, DECOR_KEYS, RATIOS, SLIDE_W, BG_COLORS, FONTS, fontStack, paletteForBg } from "./core";
+import { Ic, Seg, Stepper, IconBtn, BgColorPicker, PatternTile, PatternDiagram, Popover } from "./icons";
 import { StripContent } from "./strip";
 
 /* ============ TOP BAR ============ */
@@ -62,22 +62,25 @@ const LEFT_TABS = [
   { id: "layouts", label: "Layouts", icon: Ic.layouts },
   { id: "photos",  label: "Photos",  icon: Ic.image },
   { id: "text",    label: "Text",    icon: Ic.text },
-  { id: "adjust",  label: "Adjust",  icon: Ic.adjust, soon: true },
+  { id: "effects", label: "Effect",  icon: Ic.adjust },
   { id: "crop",    label: "Crop",    icon: Ic.crop },
 ];
 
-export function LeftRail({ tab, onTab }: any) {
+export function LeftRail({ tab, onTab, open = true }: any) {
   return (
     <nav className="leftRail">
-      {LEFT_TABS.map(t => (
-        <button key={t.id} type="button"
-          className={"railBtn" + (t.id === tab ? " on" : "")}
-          onClick={() => onTab(t.id)} title={t.soon ? t.label + " — coming soon" : t.label}>
-          {t.icon}
-          <span>{t.label}</span>
-          {t.soon && <em className="soonDot"></em>}
-        </button>
-      ))}
+      {LEFT_TABS.map(t => {
+        const active = t.id === tab && open;
+        return (
+          <button key={t.id} type="button"
+            className={"railBtn" + (active ? " on" : "")}
+            onClick={() => onTab(t.id)}
+            title={active ? "Hide " + t.label + " panel" : t.label}>
+            {t.icon}
+            <span>{t.label}</span>
+          </button>
+        );
+      })}
     </nav>
   );
 }
@@ -127,11 +130,19 @@ function LayoutsSection({ enabled, onToggle, offCount, onShuffle, spinning }: an
   );
 }
 
-function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwapSlots, onAddSlot,
-  pool = [], onUsePool, onPoolToSlot, onRemovePool, onSlotToPool }: any) {
+function PhotosSection({ tpl, photos, photoIds = [], onAddPhotos, onSelectSlot, selected, onSwapSlots, onAddSlot,
+  pool = [], onUsePool, onPoolToSlot, onRemovePool, onSlotToPool,
+  onShuffleFill, onClearSlots, onDeleteAll }: any) {
   const slots = tpl.boxes.map((_b: any, i: number) => i);
   const filled = slots.filter((i: number) => photos[i]);
   const empty = slots.length - filled.length;
+  const anyPlaced = filled.length > 0;
+  const usedIds = React.useMemo(() => new Set(photoIds.filter(Boolean)), [photoIds]);
+  // library shows only photos not currently in a slot; placing one hides it,
+  // clearing/reshuffling a slot brings its photo back (pool is the master list)
+  const available = React.useMemo(
+    () => pool.map((p: any, idx: number) => ({ ...p, idx })).filter((p: any) => !usedIds.has(p.id)),
+    [pool, usedIds]);
   const [dragOver, setDragOver] = React.useState<number | null>(null);
   const [poolOver, setPoolOver] = React.useState(false);
   return (
@@ -139,11 +150,21 @@ function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwa
       <div className="panelHd">
         <h2>Photos</h2>
         <p>{filled.length} placed · {empty} empty {empty ? "slot" + (empty > 1 ? "s" : "") : ""}
-          {pool.length ? ` · ${pool.length} in pool` : ""}</p>
+          {available.length ? ` · ${available.length} in library` : ""}</p>
       </div>
       <button type="button" className="bigAction" onClick={onAddPhotos}>
         {Ic.photos}<span>Add photos</span>
       </button>
+      <div className="photoActions">
+        <button type="button" className="miniBtn" onClick={onShuffleFill}
+          disabled={!available.length || !empty} title="Randomly place library photos into empty slots">
+          {Ic.shuffle}<span>Shuffle fill</span>
+        </button>
+        <button type="button" className="miniBtn" onClick={onClearSlots}
+          disabled={!anyPlaced} title="Empty every slot — photos return to the library">
+          {Ic.close}<span>Clear slots</span>
+        </button>
+      </div>
       <div className="panelScroll">
         <div className="photoTray">
           {slots.map((i: number) => (
@@ -180,36 +201,43 @@ function PhotosSection({ tpl, photos, onAddPhotos, onSelectSlot, selected, onSwa
           {Ic.plus}<span>Add photo slot</span>
         </button>
 
-        {pool.length > 0 && (
-          <section className="pGroup poolGroup">
-            <h3>Photo pool <span className="poolCount">{pool.length}</span></h3>
-            <div className={"photoTray poolTray" + (poolOver ? " dragOver" : "")}
-              onDragOver={(e) => {
-                if ([...e.dataTransfer.types].includes("seamless/slot")) { e.preventDefault(); setPoolOver(true); }
-              }}
-              onDragLeave={() => setPoolOver(false)}
-              onDrop={(e) => {
-                e.preventDefault(); setPoolOver(false);
-                const from = Number(e.dataTransfer.getData("seamless/slot"));
-                if (Number.isInteger(from)) onSlotToPool(from);
-              }}>
-              {pool.map((p: any, idx: number) => (
-                <button key={p.id} type="button" className="trayItem poolItem"
-                  onClick={() => onUsePool(idx)}
-                  title="Click to place in the selected (or next empty) slot — drag onto a slot to place"
-                  draggable
-                  onDragStart={(e) => { e.dataTransfer.setData("seamless/pool", String(idx)); e.dataTransfer.effectAllowed = "move"; }}>
-                  <img src={p.url} alt="" draggable={false} />
-                  <span className="trayX" title="Remove from pool"
-                    onClick={(e) => { e.stopPropagation(); onRemovePool(idx); }}>×</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        <section className="pGroup poolGroup">
+          <h3>Photo library <span className="poolCount">{available.length}</span>
+            {pool.length > 0 && (
+              <button type="button" className="linkBtn poolClearBtn" onClick={onDeleteAll}
+                title="Delete every photo from this project (library and slots)">
+                {Ic.trash}<span>Delete all</span>
+              </button>
+            )}
+          </h3>
+          <div className={"photoTray poolTray" + (poolOver ? " dragOver" : "")}
+            onDragOver={(e) => {
+              if ([...e.dataTransfer.types].includes("seamless/slot")) { e.preventDefault(); setPoolOver(true); }
+            }}
+            onDragLeave={() => setPoolOver(false)}
+            onDrop={(e) => {
+              e.preventDefault(); setPoolOver(false);
+              const from = Number(e.dataTransfer.getData("seamless/slot"));
+              if (Number.isInteger(from)) onSlotToPool(from);
+            }}>
+            {available.map((p: any) => (
+              <button key={p.id} type="button" className="trayItem poolItem"
+                onClick={() => onUsePool(p.idx)}
+                title="Click to place in the selected (or next empty) slot — drag onto a slot to place"
+                draggable
+                onDragStart={(e) => { e.dataTransfer.setData("seamless/pool", String(p.idx)); e.dataTransfer.effectAllowed = "move"; }}>
+                <img src={p.url} alt="" draggable={false} />
+                <span className="trayX" title="Delete from this project"
+                  onClick={(e) => { e.stopPropagation(); onRemovePool(p.idx); }}>×</span>
+              </button>
+            ))}
+            {!available.length && <span className="poolEmpty">Photos wait here until you place them — clearing
+              or reshuffling a slot returns its photo here, never losing it.</span>}
+          </div>
+        </section>
       </div>
-      <p className="panelFoot">Add more photos than slots — extras wait in the pool. Shuffle fills empty slots from it,
-        or click a pool photo to place it. Drag a slot photo here to send it back.</p>
+      <p className="panelFoot">Placed photos leave the library and live in the carousel. Clear a slot (or drag its
+        photo here) and the photo comes back. Nothing is ever lost to a shuffle.</p>
     </>
   );
 }
@@ -398,19 +426,86 @@ function CropSection({ tpl, photos, panzoom, selected, onSelectSlot, onStraighte
   );
 }
 
-function SoonSection({ icon, title, blurb, items }: any) {
+/* Carousel-wide photographic effects. Each slider is an intensity 0..1;
+   0 = off. Overlays are painted by StripContent / drawStrip over the photos. */
+const EFFECT_DEFS = [
+  { key: "vignette", label: "Vignette", desc: "Darkens each post's edges to pull the eye inward." },
+  { key: "gradient", label: "Gradient fade", desc: "Graduated darken toward the bottom — makes captions pop." },
+];
+// brainstormed, not yet built — the pro-photographer effect shelf
+const EFFECT_SOON = [
+  "Film grain intensity", "Light leaks & flares", "Duotone / split-tone",
+  "Fade / matte blacks", "Bloom & glow", "Chromatic aberration",
+  "Dust & scratches", "Border / passe-partout",
+];
+
+function EffectsSection({ slideEffects, onSlideEffect, onClearSlideEffects, onApplyEffectsToAll,
+  activePost, n }: any) {
+  // which post the sliders edit — default to the post selected on the canvas
+  const [sel, setSel] = React.useState<number>(activePost ?? 0);
+  React.useEffect(() => { if (activePost != null) setSel(activePost); }, [activePost]);
+  const slide = Math.min(sel, n - 1);
+  const fx = (slideEffects && slideEffects[slide]) || { vignette: 0, gradient: 0 };
+  const anyOn = fx.vignette > 0 || fx.gradient > 0;
+  const posts = Array.from({ length: n }, (_, i) => i);
   return (
     <>
       <div className="panelHd">
-        <h2>{title}</h2>
-        <p>{blurb}</p>
+        <h2>Effects</h2>
+        <p>Pick a post, then dial in its cinematic finish.</p>
       </div>
       <div className="panelScroll">
-        <div className="soonHero">{icon}</div>
+        <InspGroup label={"Apply to post " + (slide + 1)}>
+          <div className="fxPostPick">
+            {posts.map(i => {
+              const on = slideEffects && slideEffects[i] &&
+                (slideEffects[i].vignette > 0 || slideEffects[i].gradient > 0);
+              return (
+                <button key={i} type="button"
+                  className={"fxPostChip" + (i === slide ? " on" : "") + (on ? " has" : "")}
+                  onClick={() => setSel(i)} title={"Post " + (i + 1) + (on ? " · has effects" : "")}>
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+        </InspGroup>
+
+        {EFFECT_DEFS.map(d => {
+          const val = fx[d.key] || 0;
+          const on = val > 0;
+          return (
+            <InspGroup key={d.key} label={
+              <span className="fxHead">
+                <button type="button" className={"pillToggle" + (on ? " on" : "")}
+                  onClick={() => onSlideEffect(slide, d.key, on ? 0 : 0.5)}>
+                  <span className="pillBox">{on ? Ic.check : null}</span>{d.label}
+                </button>
+                <em className="fxPct">{on ? Math.round(val * 100) + "%" : "Off"}</em>
+              </span>
+            }>
+              <input type="range" className="slider" min="0" max="1" step="0.01"
+                value={val} onChange={(e) => onSlideEffect(slide, d.key, Number(e.target.value))} />
+              <p className="inspHint">{d.desc}</p>
+            </InspGroup>
+          );
+        })}
+
+        <div className="btnRow">
+          <button type="button" className="lineBtn" disabled={!anyOn}
+            onClick={() => onApplyEffectsToAll(slide)}>
+            {Ic.swap}<span>Apply to all posts</span>
+          </button>
+          <button type="button" className="lineBtn danger" disabled={!anyOn}
+            onClick={() => onClearSlideEffects(slide)}>
+            {Ic.reset}<span>Clear</span>
+          </button>
+        </div>
+
         <ul className="soonList">
-          {items.map((it: string, i: number) => <li key={i}>{it}</li>)}
+          {EFFECT_SOON.map((it, i) => <li key={i}>{it}</li>)}
         </ul>
-        <SoonNote label="In the works" />
+        <SoonNote label="More effects in the works" />
       </div>
     </>
   );
@@ -426,18 +521,17 @@ export function LeftPanel(props: any) {
   if (tab === "layouts") body = <LayoutsSection {...props} />;
   else if (tab === "photos") body = <PhotosSection {...props} />;
   else if (tab === "text") body = <TextSection {...props} />;
-  else if (tab === "adjust") body = <SoonSection icon={Ic.adjust} title="Adjust"
-    blurb="Tune each photo to match." items={[
-      "Brightness, contrast & warmth", "Filters & presets", "Per-photo or whole carousel"]} />;
+  else if (tab === "effects") body = <EffectsSection {...props} />;
   else if (tab === "crop") body = <CropSection {...props} />;
   return <aside className="leftPanel">{body}</aside>;
 }
 
 /* ============ RIGHT INSPECTOR ============ */
 
-export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bgStyle, texture,
-  onPalette, onN, onH, onBgStyle, onTexture, onReplace, onRemove, onZoomTo, onNudge,
+export function Inspector({ selected, tpl, photos, panzoom, bgColor, n, H, bgStyle, texture,
+  onBgColor, onN, onH, onBgStyle, onTexture, onReplace, onRemove, onZoomTo, onNudge,
   onFitPhoto, onStraighten, onShare, onDeleteSlot }: any) {
+  const palette = paletteForBg(bgColor);
 
   if (selected != null) {
     const src = photos[selected];
@@ -449,7 +543,7 @@ export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bg
           <span className="inspTag">Slot {selected + 1}</span>
         </div>
         <div className="inspScroll">
-          <div className="photoPreview" style={{ background: PALETTES[paletteIdx].ph }}>
+          <div className="photoPreview" style={{ background: palette.ph }}>
             {src ? <img src={src} alt="" draggable={false} /> : <span>Empty slot</span>}
           </div>
           <div className="btnRow">
@@ -518,7 +612,7 @@ export function Inspector({ selected, tpl, photos, panzoom, paletteIdx, n, H, bg
             options={RATIOS.map(r => ({ value: r.h, label: r.label, title: `${r.name} — 1080×${r.h}` }))} />
         </InspGroup>
         <InspGroup label="Background color">
-          <PaletteSwatches paletteIdx={paletteIdx} onChange={onPalette} />
+          <BgColorPicker value={bgColor} onChange={onBgColor} />
         </InspGroup>
         <InspGroup label="Background style">
           <Seg full compact value={bgStyle} onChange={onBgStyle} options={[
@@ -574,8 +668,9 @@ export function InspGroup({ label, children }: any) {
 
 /* ============ BOTTOM SLIDE STRIP ============ */
 
-function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H, active,
-  locked, slideBg, onSelectPost, onToggleLock, onPickLayout, onPickBg }: any) {
+function PostThumb({ tpl, palette, bgStyle, texture, slideEffects, texts, api, i, s, slideW, H, active,
+  locked, slideBg, onSelectPost, onToggleLock, onPickLayout, onPickBg, onMovePost }: any) {
+  const [dropSide, setDropSide] = React.useState<null | "before" | "after">(null);
   // popover position is fixed — the bottom strip scrolls horizontally, so an
   // absolutely-positioned popover would be clipped by the scroll container
   const [pickAt, setPickAt] = React.useState<{ x: number; y: number } | null>(null);
@@ -585,6 +680,9 @@ function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H
   const bgOpen = bgAt !== null;
   const curBg = (slideBg && slideBg[i]) || null;
   const singles = Object.keys(PATTERNS).filter(t => PATTERNS[t].span === 1);
+  // cross-post layouts start at this post and run rightward — only offer the
+  // ones whose span still fits before the end of the carousel
+  const multis = Object.keys(PATTERNS).filter(t => PATTERNS[t].span > 1 && i + PATTERNS[t].span <= tpl.n);
   const openPop = (e: React.MouseEvent, cur: any, set: (v: any) => void) => {
     e.stopPropagation();
     if (cur) { set(null); return; }
@@ -592,14 +690,49 @@ function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H
     set({ x: r.left + r.width / 2, y: r.top - 8 });
   };
   return (
-    <span className={"ssThumbWrap" + (locked ? " locked" : "")}>
+    <span className={"ssThumbWrap" + (locked ? " locked" : "")
+      + (dropSide ? " drop-" + dropSide : "")}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("seamless/post", String(i));
+        e.dataTransfer.effectAllowed = "move";
+        // custom drag image — Chrome's native ghost paints transformed children
+        // (ssInner translateX, photo pan/zoom) without the overflow clip, so the
+        // snapshot shows the whole strip instead of just this post
+        const ghost = document.createElement("div");
+        ghost.className = "ssDragGhost";
+        ghost.textContent = String(i + 1);
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, 24, 30);
+        setTimeout(() => ghost.remove(), 0);
+      }}
+      onDragOver={(e) => {
+        if (![...e.dataTransfer.types].includes("seamless/post")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const r = e.currentTarget.getBoundingClientRect();
+        setDropSide(e.clientX < r.left + r.width / 2 ? "before" : "after");
+      }}
+      onDragLeave={() => setDropSide(null)}
+      onDrop={(e) => {
+        if (![...e.dataTransfer.types].includes("seamless/post")) return;
+        e.preventDefault();
+        const side = dropSide; setDropSide(null);
+        const from = Number(e.dataTransfer.getData("seamless/post"));
+        if (Number.isNaN(from) || from === i) return;
+        // insertion index: dropping "after" post i while dragging from the left
+        // means landing on i; from the right, i+1 — mirror for "before"
+        let to = side === "after" ? (from > i ? i + 1 : i) : (from > i ? i : i - 1);
+        if (to === from) return;
+        onMovePost(from, to);
+      }}>
       <button type="button"
         className={"ssThumb" + (active ? " on" : "")}
-        onClick={() => onSelectPost(i)} title={"Post " + (i + 1)}>
+        onClick={() => onSelectPost(i)} title={"Post " + (i + 1) + " — drag to reorder"}>
         <span className="ssClip" style={{ width: slideW, height: H }}>
           <span className="ssInner" style={{ transform: `translateX(${-i * slideW}px)` }}>
             <StripContent tpl={tpl} palette={palette} bgStyle={bgStyle}
-              texture={texture} texts={texts} s={s} slideBg={slideBg} api={{ ...api, interactive: false }} />
+              texture={texture} slideEffects={slideEffects} texts={texts} s={s} slideBg={slideBg} api={{ ...api, interactive: false }} />
           </span>
         </span>
         <em className="ssNum">{i + 1}</em>
@@ -638,6 +771,20 @@ function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H
             </button>
           ))}
         </div>
+        {multis.length > 0 && <>
+          <span className="layoutPopHd layoutPopSub">Across posts</span>
+          <div className="layoutPopGrid">
+            {multis.map(t => (
+              <button key={t} type="button"
+                className={"layoutPick" + (tpl.layoutAt[i] === t ? " on" : "")}
+                title={PATTERN_INFO[t].desc}
+                onClick={() => { setPickOpen(false); onPickLayout(i, t); }}>
+                <PatternDiagram type={t} />
+                <span>{PATTERN_INFO[t].label}</span>
+              </button>
+            ))}
+          </div>
+        </>}
       </Popover>
       <Popover open={bgOpen} onClose={() => setBgAt(null)} className="bgPop"
         style={bgAt ? {
@@ -670,8 +817,8 @@ function PostThumb({ tpl, palette, bgStyle, texture, texts, api, i, s, slideW, H
   );
 }
 
-export function BottomStrip({ tpl, palette, bgStyle, texture, texts, api, activePost, onSelectPost,
-  onAddPost, n, locks = [], slideBg = [], onToggleLock, onPickLayout, onPickBg }: any) {
+export function BottomStrip({ tpl, palette, bgStyle, texture, slideEffects, texts, api, activePost, onSelectPost,
+  onAddPost, n, locks = [], slideBg = [], onToggleLock, onPickLayout, onPickBg, onMovePost }: any) {
   const H = 60;
   const s = H / tpl.H;
   const slideW = SLIDE_W * s;
@@ -682,11 +829,11 @@ export function BottomStrip({ tpl, palette, bgStyle, texture, texts, api, active
         {Array.from({ length: tpl.n }, (_, i) => (
           <React.Fragment key={i}>
             {i > 0 && <span className="ssLink" title="Seamless boundary">{Ic.link}</span>}
-            <PostThumb tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture}
+            <PostThumb tpl={tpl} palette={palette} bgStyle={bgStyle} texture={texture} slideEffects={slideEffects}
               texts={texts} api={api} i={i} s={s} slideW={slideW} H={H}
               active={activePost === i} locked={!!locks[i]} slideBg={slideBg}
               onSelectPost={onSelectPost} onToggleLock={onToggleLock} onPickLayout={onPickLayout}
-              onPickBg={onPickBg} />
+              onPickBg={onPickBg} onMovePost={onMovePost} />
           </React.Fragment>
         ))}
         {n < 10 && (

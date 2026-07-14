@@ -73,6 +73,15 @@ export type BgStyle = "flat" | "gradient" | "blurpano";
 export type Texture = "none" | "grain" | "paper";
 export type ViewMode = "strip" | "posts";
 
+/* Carousel-wide photographic effects. Each value is an intensity 0..1
+   (0 = off). Combinable — overlays are painted over the photos, under text. */
+export interface Effects {
+  vignette: number;  // darken slide edges/corners (per-slide radial)
+  gradient: number;  // graduated darken toward the bottom (cinematic)
+}
+
+export const DEFAULT_EFFECTS: Effects = { vignette: 0, gradient: 0 };
+
 /* The interaction surface threaded from <App> down into the strip renderer.
    photos are src strings (null = empty slot); panzoom keyed by slot index. */
 export interface StripApi {

@@ -5,7 +5,7 @@
      photos — { id, blob } original image files, shared across docs and
               garbage-collected when no doc references them. */
 
-import type { Template, Panzoom, TextBlock, Enabled, BgStyle, Texture } from "./types";
+import type { Template, Panzoom, TextBlock, Enabled, BgStyle, Texture, Effects } from "./types";
 
 export interface DocRecord {
   id: string;
@@ -15,9 +15,11 @@ export interface DocRecord {
   cursor: number;
   n: number;
   H: number;
-  paletteIdx: number;
+  paletteIdx?: number; // legacy — migrated to bgColor on load
+  bgColor?: string;
   bgStyle: BgStyle;
   texture: Texture;
+  slideEffects?: Effects[]; // per-post effect intensities (index = slide)
   enabled: Enabled;
   texts: TextBlock[];
   panzoom: Record<number, Panzoom>;

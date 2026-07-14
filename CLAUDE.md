@@ -88,7 +88,7 @@ re-rolls only unlocked slides (a lock on any slide of a multi-span layout locks 
 and `setSlideLayout(tpl, slide, type)` swaps one slide's layout in place. Both return a box-index
 `map` (`map[newIdx] = oldIdx | -1`) that `<App>.applyMap` uses to keep photos/panzoom glued to
 surviving boxes (`remapArr`). `addSlot`/`removeSlot` handle manual slots. Share links:
-`encodeLook`/`decodeLook` round-trip `{seed, n, H, enabled, paletteIdx, bgStyle, texture, texts}`
+`encodeLook`/`decodeLook` round-trip `{seed, n, H, enabled, bgColor, bgStyle, texture, texts}`
 through URL-safe base64 in `location.hash` (`#look=…`), parsed at boot.
 
 Scale convention: layout values are stored unscaled in strip coords; both renderers multiply by
@@ -119,7 +119,9 @@ Persistence: **projects live in IndexedDB** (`store.ts`, DB `seamless`): autosav
 writes the full `DocRecord` (template history + cursor, texts, panzoom, photoIds, locks, settings,
 doc name); photos are stored as blobs and resolved to fresh object URLs on open (`loadPhotoUrls`).
 `localStorage` only holds new-doc defaults (`seamless_settings`: `enabled`, `bgStyle`, `texture`,
-`paletteIdx`) and `seamless_theme`. `bgStyle` is `flat | gradient | blurpano` (a legacy `white`
+`bgColor`) and `seamless_theme`. The carousel background is now a free hex color (`bgColor`,
+picked via `BgColorPicker`); the old `paletteIdx` integer is migrated on load by `resolveBgColor`
+(`core.ts`), and `paletteForBg(hex)` derives the full `Palette`. `bgStyle` is `flat | gradient | blurpano` (a legacy `white`
 value loads as `flat`). Accent/morph are hardcoded constants in `app.tsx` (`ACCENT`, `MORPH_MS`).
 
 ## Adding a new layout pattern

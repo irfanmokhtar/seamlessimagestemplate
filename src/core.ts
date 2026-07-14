@@ -2,7 +2,7 @@
    Pure data: no canvas, no DOM, no React. Produces boxes/bands/decor
    in strip coordinates. Framework-agnostic — also consumed by export.ts. */
 
-import type { Box, Template, Palette, Enabled, TextBlock } from "./types";
+import type { Box, Template, Palette, Enabled, TextBlock, Effects } from "./types";
 
 export const SLIDE_W = 1080;
 
@@ -112,6 +112,25 @@ export function paletteFromBg(bg: string, name: string): Palette {
 
 export const PALETTES: Palette[] = BG_COLORS.map(c => paletteFromBg(c.bg, c.name));
 
+/* Default carousel background (white). */
+export const DEFAULT_BG = BG_COLORS[0].bg;
+
+/* Build a Palette from any background color (the color picker feeds arbitrary
+   hex here). Names a color that matches a preset, else uses its hex. */
+export function paletteForBg(bg: string): Palette {
+  const hex = bg || DEFAULT_BG;
+  const preset = BG_COLORS.find(c => c.bg.toLowerCase() === hex.toLowerCase());
+  return paletteFromBg(hex, preset ? preset.name : hex.toUpperCase());
+}
+
+/* Resolve a stored doc/look/defaults blob to a bg color, migrating the old
+   `paletteIdx` integer to its hex. */
+export function resolveBgColor(src: any): string {
+  if (src && typeof src.bgColor === "string") return src.bgColor;
+  if (src && Number.isInteger(src.paletteIdx) && PALETTES[src.paletteIdx]) return PALETTES[src.paletteIdx].bg;
+  return DEFAULT_BG;
+}
+
 /* CSS background for a slide fill — flat hex, or the same 135° gradient the
    global background uses when bgStyle is "gradient". */
 export const bgFillCss = (hex: string, gradient: boolean) =>
@@ -212,6 +231,20 @@ export function shade(hex: string, amt: number) {
   const mix = (c: number) => Math.round(c + (t - c) * f);
   return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
 }
+
+/* Effect tuning — shared by both renderers (strip.tsx DOM + export.ts canvas)
+   so the preview and the exported image stay identical. Intensity is 0..1. */
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v || 0));
+export const VIGNETTE_INNER = 0.52;   // radial: transparent inside this fraction
+export const GRADIENT_TOP = 0.42;     // gradient starts fading from here down
+export const vignetteAlpha = (i: number) => 0.62 * clamp01(i); // max black at corner
+export const gradientAlpha = (i: number) => 0.70 * clamp01(i); // max black at bottom
+
+/* per-slide effect helpers — slideEffects is a sparse array indexed by slide */
+export const NO_EFFECT: Effects = { vignette: 0, gradient: 0 };
+export const effectAt = (arr: Effects[] | undefined, slide: number): Effects =>
+  (arr && arr[slide]) || NO_EFFECT;
+export const hasEffect = (e: Effects | undefined) => !!e && (e.vignette > 0 || e.gradient > 0);
 
 function weightedPick(types: string[]) {
   const total = types.reduce((s, t) => s + PATTERNS[t].weight, 0);
@@ -473,12 +506,35 @@ export function generateTemplate(n: number, H: number, enabled: Enabled, seed?: 
    Re-roll only unlocked slides; locked slides keep their boxes/bands verbatim.
    Returns the new template plus a box-index map: map[newIdx] = oldIdx for kept
    boxes, -1 for fresh ones — the app uses it to keep photos on locked slides. */
+/* Re-key freshly generated boxes onto the ids of the boxes they replace
+   (positionally, skipping ids kept boxes still own). The DOM preview keys
+   slots by box id, so reusing an id is what lets CSS morph a slot from its
+   old geometry to its new one on shuffle / layout swap. */
+function adoptIds(boxes: Box[], map: number[] | null, old: Box[]) {
+  const m = map ?? boxes.map(() => -1);
+  const used = new Set<number>();
+  m.forEach(mi => { if (mi >= 0) used.add(old[mi].id); });
+  const spare = old.map(o => o.id).filter(id => !used.has(id));
+  let top = Math.max(0, ...old.map(o => o.id), ...boxes.map(b => b.id));
+  boxes.forEach((b, k) => {
+    if (m[k] >= 0) return;
+    const pref = old[k]?.id;
+    if (pref != null && !used.has(pref)) { b.id = pref; used.add(pref); return; }
+    const s = spare.find(id => !used.has(id));
+    if (s != null) { b.id = s; used.add(s); } else { b.id = ++top; }
+  });
+}
+
 export function shuffleTemplate(
   prev: Template, enabled: Enabled, locks: boolean[], seed?: number,
 ): { tpl: Template; map: number[] | null } {
   const n = prev.n, H = prev.H;
   const anyLock = locks.slice(0, n).some(Boolean);
-  if (!anyLock) return { tpl: generateTemplate(n, H, enabled, seed), map: null };
+  if (!anyLock) {
+    const tpl = generateTemplate(n, H, enabled, seed);
+    adoptIds(tpl.boxes, null, prev.boxes);
+    return { tpl, map: null };
+  }
 
   const sd = (seed ?? newSeed()) >>> 0;
   return seeded(sd, () => {
@@ -525,6 +581,7 @@ export function shuffleTemplate(
     }
 
     if (enabled.overhang) applyOverhangs(boxes, layoutAt, n, 0, locked);
+    adoptIds(boxes, map, prev.boxes);
 
     return { tpl: { boxes, bands, decor: makeDecor(n, H, enabled), layoutAt, n, H, seed: sd }, map };
   });
@@ -537,20 +594,46 @@ export function shuffleTemplate(
 export function setSlideLayout(
   tpl: Template, slide: number, type: string,
 ): { tpl: Template; map: number[] } {
-  const t0 = tpl.layoutAt[slide];
-  let a = slide, b = slide;
-  if (PATTERNS[t0] && PATTERNS[t0].span > 1) {
-    while (a > 0 && tpl.layoutAt[a - 1] === t0) a--;
-    while (b + 1 < tpl.n && tpl.layoutAt[b + 1] === t0) b++;
-  }
+  const n = tpl.n;
+  // span of the picked layout — multi-span types (spread/panorama/…) occupy
+  // several posts starting at `slide`; clamp the start so the span fits.
+  let span = (PATTERNS[type] && PATTERNS[type].span) || 1;
+  if (span > n) span = 1;
+  let s0 = Math.min(slide, n - span);
+  if (s0 < 0) s0 = 0;
+  const s1 = s0 + span - 1;
+
+  // the affected region is the target span expanded to swallow any existing
+  // multi-span groups it overlaps at either edge (so no group is left half-cut)
+  const groupStart = (k: number) => {
+    const t = tpl.layoutAt[k]; let a = k;
+    if (PATTERNS[t] && PATTERNS[t].span > 1)
+      while (a > 0 && tpl.layoutAt[a - 1] === t) a--;
+    return a;
+  };
+  const groupEnd = (k: number) => {
+    const t = tpl.layoutAt[k]; let b = k;
+    if (PATTERNS[t] && PATTERNS[t].span > 1)
+      while (b + 1 < n && tpl.layoutAt[b + 1] === t) b++;
+    return b;
+  };
+  const a = groupStart(s0);
+  const b = groupEnd(s1);
 
   coreBoxId = tpl.boxes.reduce((m, x) => Math.max(m, x.id), 0);
   const layoutAt = tpl.layoutAt.slice();
   const inserted: Box[] = [];
   const insBands: Template["bands"] = [];
-  for (let k = a; k <= b; k++) {
-    layoutAt[k] = k === slide ? type : "full";
-    emitLayout(layoutAt[k], 1, k, tpl.H, inserted, insBands);
+  for (let k = a; k <= b; ) {
+    if (k === s0) {                       // the picked layout fills its whole span
+      for (let j = 0; j < span; j++) layoutAt[s0 + j] = type;
+      emitLayout(type, span, s0, tpl.H, inserted, insBands);
+      k = s1 + 1;
+    } else {                              // surrounding slots fall back to full-bleed
+      layoutAt[k] = "full";
+      emitLayout("full", 1, k, tpl.H, inserted, insBands);
+      k++;
+    }
   }
 
   const boxes: Box[] = [];
@@ -569,8 +652,72 @@ export function setSlideLayout(
     const sl = Math.round(bd.x / SLIDE_W);
     return sl < a || sl > b;
   }).concat(insBands);
+  adoptIds(boxes, map, tpl.boxes);
 
   return { tpl: { ...tpl, boxes, bands, layoutAt }, map };
+}
+
+/* ---------- reorder posts ----------
+   Move the post at `from` so it sits at position `to` (insertion semantics —
+   dragging post 6 onto post 4 makes it the new post 4). Cross-slide layouts
+   move as one unit: grabbing any slide of a span moves the whole span, and a
+   drop inside another span lands next to it, never splitting it.
+   Returns the new template, a box-index map (map[newIdx] = oldIdx, same
+   contract as shuffleTemplate) and `order` (order[newSlide] = oldSlide) so the
+   app can remap per-slide state (locks, backgrounds, photos, texts). */
+export function moveSlide(
+  tpl: Template, from: number, to: number,
+): { tpl: Template; map: number[]; order: number[] } | null {
+  const n = tpl.n;
+  if (from === to || from < 0 || to < 0 || from >= n || to >= n) return null;
+
+  // split slides into atomic groups (a multi-span layout is one group)
+  const groups: number[][] = [];
+  for (let i = 0; i < n; ) {
+    const t = tpl.layoutAt[i];
+    let b = i;
+    if (PATTERNS[t] && PATTERNS[t].span > 1) {
+      while (b + 1 < n && tpl.layoutAt[b + 1] === t) b++;
+    }
+    groups.push(Array.from({ length: b - i + 1 }, (_, k) => i + k));
+    i = b + 1;
+  }
+  const gi = (slide: number) => groups.findIndex(g => g.includes(slide));
+  const gFrom = gi(from), gTo = gi(to);
+  if (gFrom === gTo) return null;
+
+  // remove the dragged group, re-insert at gTo: moving backward it lands just
+  // before the drop group (taking its position); moving forward, just after it
+  const reordered = groups.slice();
+  const [moved] = reordered.splice(gFrom, 1);
+  reordered.splice(gTo, 0, moved);
+
+  const order: number[] = [];            // order[newSlide] = oldSlide
+  for (const g of reordered) for (const s of g) order.push(s);
+  const newAt: number[] = [];            // newAt[oldSlide] = newSlide
+  order.forEach((old, nw) => { newAt[old] = nw; });
+
+  const layoutAt = order.map(old => tpl.layoutAt[old]);
+
+  // rebuild boxes in new-slide order so photo indices follow their post
+  const boxes: Box[] = [];
+  const map: number[] = [];
+  for (const g of reordered) {
+    const dx = (newAt[g[0]] - g[0]) * SLIDE_W;
+    tpl.boxes.forEach((bx, oi) => {
+      if (bx.slide < g[0] || bx.slide > g[g.length - 1]) return;
+      boxes.push({ ...bx, slide: bx.slide + newAt[g[0]] - g[0], x: bx.x + dx });
+      map.push(oi);
+    });
+  }
+
+  const bands = tpl.bands.map(bd => {
+    const sl = Math.round(bd.x / SLIDE_W);
+    const dx = ((newAt[sl] ?? sl) - sl) * SLIDE_W;
+    return { ...bd, x: bd.x + dx };
+  });
+
+  return { tpl: { ...tpl, boxes, bands, layoutAt }, map, order };
 }
 
 /* ---------- manual slot ops ---------- */
@@ -595,9 +742,11 @@ export interface Look {
   n: number;
   H: number;
   enabled: Enabled;
-  paletteIdx: number;
+  paletteIdx?: number; // legacy — migrated to bgColor
+  bgColor?: string;
   bgStyle: string;
   texture: string;
+  slideEffects?: Effects[]; // per-post effect intensities (index = slide)
   texts: TextBlock[];
 }
 
